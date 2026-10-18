@@ -140,14 +140,67 @@ Every experiment goes here, **failures as much as successes**: what we tried, th
   3. The E4 probe didn't hit it: with ~1% per 1,000 shifts it was luck, not proof of safety.
 - **Status:** open. Waiting on Ali's decision for the empty-inbox rule, then re-run E5.
 
+## Fix · 20:50 · At least 1 false alarm per turn
+
+- **Decision (Ali):** every noise shape draws at least 1 false alarm per turn, so there's always something to open. Other options considered: top up only when the inbox is empty (a hidden special rule), or a 13th "wait" action (changes the frozen §5 interface).
+- **Setup:**
+  - commit `2864ccb`; spec §4.1 + changelog updated
+  - tests: at least 1 for every shape, even with an average of 1; the 3 crash seeds (9741, 10078, 21607) now start with a non-empty inbox
+  - 340 tests pass
+- **Also:** the experiment script now records a failed job and carries on (commit `9a1a845`).
+
+## E6 · 20:55–21:00 · PPO on the 3 varying-noise games (re-run of E5)
+
+- **Goal:** does PPO's lead over the bandit survive when the false-alarm count varies (no "more than 9" shortcut)? Which shape should become the default?
+- **Setup:**
+  - commit `9a1a845`; 3 shapes × 3 seeds × 30,000 shifts, 9 jobs in parallel, then all players on the test shifts of each game
+  - command: `uv run python experiments/w01_triage/scripts/noise_experiment.py <out_dir>`
+  - outputs: `e6_noise_count/` (per-game `results.json`, learning curves, plots, `summary.json`)
+  - "fixed" column = E3 (commit `db5d3ae`; fixed games are unchanged by the at-least-1 rule)
+- **Result:**
+  - Wall time 5 min 06 s, **0 failed jobs**.
+
+| Stopped before ransomware | fixed | binomial | poisson | uniform |
+|---|---|---|---|---|
+| maskable_ppo | **2.89** ± 0.03 | **2.86** ± 0.03 | **2.88** ± 0.03 | **2.88** ± 0.03 |
+| oracle | 2.82 | 2.83 | 2.83 | 2.82 |
+| smart_analyst | 2.77 | 2.77 | 2.79 | 2.79 |
+| learned_bandit | 2.67 ± 0.05 | 2.72 ± 0.05 | 2.69 ± 0.05 | 2.62 ± 0.05 |
+| random | 1.02 | 1.06 | 1.07 | 1.03 |
+| severity_first | 0.24 | 0.25 | 0.25 | 0.25 |
+
+| Score per shift | fixed | binomial | poisson | uniform |
+|---|---|---|---|---|
+| maskable_ppo | **+2.07** | **+1.92** | **+2.00** | **+2.00** |
+| oracle | +1.86 | +1.88 | +1.83 | +1.80 |
+| smart_analyst | +1.41 | +1.39 | +1.46 | +1.49 |
+| learned_bandit | +0.85 | +1.09 | +0.91 | +0.55 |
+
+| PPO minus bandit | fixed | binomial | poisson | uniform |
+|---|---|---|---|---|
+| stopped | +0.22 | +0.15 | +0.19 | +0.26 |
+| reached ransomware | −0.19 | −0.12 | −0.16 | −0.22 |
+| score | +1.22 | +0.83 | +1.09 | +1.44 |
+
+  - PPO seeds agree in every game: stopped 2.85–2.90, score +1.82 to +2.13.
+  - The learning curves plateau by ~5,000 shifts in every game.
+  - **Same strategy everywhere:** turns 1–3 mostly `failed_login_burst` (31–35%); turns 4–9 mostly `new_admin_account` / `cloud_key_new_asn` (~32–35% each).
+- **Verdict:**
+  - ✅ **PPO's lead over the bandit holds in all 4 games**, with non-overlapping CIs on attacks stopped.
+  - The lead is not caused by the fixed-count shortcut (consistent with E4).
+  - PPO stays above the "oracle" heuristic everywhere (Q3).
+  - The bandit is the least stable player (score +0.55 to +1.09 across games); PPO stays within +1.92 to +2.07.
+- **Decision:** Ali picks the default shape (Q6).
+
 ---
 
 ## Open questions
 
 | # | Question | Status |
 |---|---|---|
-| Q1 | What happens when the inbox is empty (no allowed action)? | **Open** (blocks E5) |
+| Q1 | What happens when the inbox is empty (no allowed action)? | ✅ Closed: at least 1 false alarm per turn (fix entry, E6) |
 | Q2 | `rules.py` is temporary Claude-written code: Ali to rewrite by hand, then re-run E1 + E3 | Open |
 | Q3 | Oracle is not an upper bound (PPO beats it): rename it in the article, or build a better one? | Open |
 | Q4 | Little headroom between the bandit and the top on the headline (stage-2 types are giveaways) | Known risk, reported honestly |
 | Q5 | Turn = 12 h matches attack speed, but analyst capacity is 5–10× too low | Stated in spec §4.2 |
+| Q6 | Default `noise_count`: fixed, binomial, poisson or uniform? | **Open** (Ali) |
