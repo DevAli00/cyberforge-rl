@@ -11,6 +11,7 @@ def test_defaults_match_spec() -> None:
     config = TriageConfig()
     assert config.n_turns == 10
     assert config.noise_per_turn == 9
+    assert config.noise_count is NoiseCount.POISSON
     assert config.attack_count_choices == (2, 3, 4)
     assert config.max_start_turn == 5
     assert config.p_advance == 0.6
@@ -62,10 +63,11 @@ def test_config_rejects_bad_values(overrides: dict[str, object]) -> None:
 # --- noise_count: how many false alarms arrive per turn ------------------------------------
 
 
-def test_noise_count_defaults_to_fixed() -> None:
+def test_noise_count_defaults_to_poisson() -> None:
+    """Ali's choice after E6: random arrivals, no 'more than 9' shortcut."""
     config = TriageConfig()
-    assert config.noise_count is NoiseCount.FIXED
-    assert config.max_noise_per_turn == 9
+    assert config.noise_count is NoiseCount.POISSON
+    assert config.max_noise_per_turn == 18
 
 
 @pytest.mark.parametrize(

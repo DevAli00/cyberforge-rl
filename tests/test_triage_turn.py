@@ -14,7 +14,7 @@ import pytest
 
 import cyberforge.envs.triage.env as env_module
 from cyberforge.envs.triage.catalogue import RULES_BY_STAGE
-from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.config import NoiseCount, TriageConfig
 from cyberforge.envs.triage.env import TriageEnv
 from cyberforge.envs.triage.rules import opened_alert
 from cyberforge.envs.triage.types import Alert, Attack, AttackStatus, HiddenView
@@ -180,7 +180,7 @@ def test_arrivals_are_shuffled_before_numbering(rec: Recorder) -> None:
     """Attack alerts must not always get the lowest or highest ids of their turn (tie fairness)."""
     positions = set()
     for seed in range(60):
-        env = TriageEnv(TriageConfig(max_start_turn=0))
+        env = TriageEnv(TriageConfig(max_start_turn=0, noise_count=NoiseCount.FIXED))
         env.reset(seed=seed)
         inbox = env.hidden_view().inbox
         positions |= {i for i, a in enumerate(inbox) if not a.is_false_alarm}

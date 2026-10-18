@@ -205,7 +205,7 @@ def _attack_alerts(view: HiddenView) -> Counter[int]:
 
 @pytest.mark.parametrize("seed", range(10))
 def test_reset_starts_attacks_due_on_turn_1(seed: int) -> None:
-    env = TriageEnv()
+    env = TriageEnv(TriageConfig(noise_count=NoiseCount.FIXED))  # exact false-alarm count
     env.reset(seed=seed)
     view = env.hidden_view()
     assert len(view.attacks) in env.config.attack_count_choices

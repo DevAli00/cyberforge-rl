@@ -25,7 +25,7 @@ class TriageConfig:
     # §4.1 shift shape
     n_turns: int = 10
     noise_per_turn: int = 9  # average number of false alarms per turn
-    noise_count: NoiseCount = NoiseCount.FIXED
+    noise_count: NoiseCount = NoiseCount.POISSON  # Ali's choice after E6
     # §4.2 attacks
     attack_count_choices: tuple[int, ...] = (2, 3, 4)
     max_start_turn: int = 5  # step index, inclusive (turn 1 to 6)

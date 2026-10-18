@@ -19,6 +19,7 @@ from cyberforge.envs.triage.generator import (
 from cyberforge.envs.triage.types import MAX_STAGE, Attack, AttackStatus
 
 CONFIG = TriageConfig()
+FIXED = TriageConfig(noise_count=NoiseCount.FIXED)  # exactly noise_per_turn false alarms
 TOLERANCE = 0.015  # on shares estimated from tens of thousands of draws
 
 
@@ -68,9 +69,9 @@ def test_draw_attacks_distributions() -> None:
 
 
 def test_draw_false_alarms_shape() -> None:
-    alarms = draw_false_alarms(_rng(), CONFIG, turn=4, first_id=37)
-    assert len(alarms) == CONFIG.noise_per_turn
-    assert [a.alert_id for a in alarms] == list(range(37, 37 + CONFIG.noise_per_turn))
+    alarms = draw_false_alarms(_rng(), FIXED, turn=4, first_id=37)
+    assert len(alarms) == FIXED.noise_per_turn
+    assert [a.alert_id for a in alarms] == list(range(37, 37 + FIXED.noise_per_turn))
     assert all(a.turn == 4 and a.is_false_alarm for a in alarms)
 
 
@@ -209,7 +210,7 @@ def test_shuffle_arrivals_mixes_the_order() -> None:
 def test_fixed_noise_count_is_always_the_average_and_uses_no_dice() -> None:
     rng = _rng()
     before = rng.bit_generator.state
-    assert {draw_noise_count(rng, CONFIG) for _ in range(100)} == {CONFIG.noise_per_turn}
+    assert {draw_noise_count(rng, FIXED) for _ in range(100)} == {FIXED.noise_per_turn}
     assert rng.bit_generator.state == before  # keeps earlier fixed-count results reproducible
 
 
