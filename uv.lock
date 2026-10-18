@@ -360,6 +360,7 @@ name = "cyberforge-rl"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "gymnasium" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pydantic" },
@@ -381,6 +382,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gymnasium", specifier = ">=1.4.0" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "pydantic", specifier = ">=2.14.1" },
@@ -419,6 +421,7 @@ wheels = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "filelock"
 version = "4.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -428,6 +431,8 @@ wheels = [
 ]
 
 [[package]]
+=======
+>>>>>>> origin/claude/w01-fake-env-iaf4q9
 name = "fonttools"
 version = "4.67.0"
 source = { registry = "https://pypi.org/simple" }
@@ -485,6 +490,7 @@ wheels = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "fsspec"
 version = "2026.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -494,6 +500,8 @@ wheels = [
 ]
 
 [[package]]
+=======
+>>>>>>> origin/claude/w01-fake-env-iaf4q9
 name = "gymnasium"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
