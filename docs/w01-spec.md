@@ -1,94 +1,145 @@
-# W1 spec: SOC alert triage with attacks that progress
+# W1 spec: the SOC triage game
 
-Status: **locked once PR #1 merges.** Any change after that goes through a PR approved by both tracks.
+This is our map for W1. It is a **living document**: if we find something while building (a number that doesn't work, a loophole), we change it through a small PR and add a line to the [changelog](#11-changelog) at the bottom.
 
-## 1. The game in one paragraph
+**Owners:** Ali builds the game (environment). Rayane builds the players (agents). We meet at the sync points in §9.
 
-A shift lasts 10 steps. Each step, about 10 new alerts arrive and the analyst (the agent) opens one. Hidden among the noise are 2–4 real attacks that move through a kill chain during the shift. Opening any alert that belongs to an attack contains the whole attack. Contain it early and you score; let it reach ransomware and you take a large penalty. Because opening a quiet early alert now prevents a disaster several steps later, this is a real sequential decision problem (credit assignment), not a bandit.
+---
 
-**The story:** severity-first triage loves `mass_file_rename` (severity 5), so it reliably catches ransomware *after* encryption has started. The agent should learn to hunt the quiet early stages.
+## 1. The game in plain words
 
-All data is synthetic. Every number below is an assumption, stated as such in the README and the article.
+A SOC analyst works a **shift**. During the shift, alerts keep arriving in the inbox. Most are false alarms. A few belong to **real attacks** that get worse over time. The analyst can only open **one alert per turn**, so they must choose well.
 
-## 2. Rule catalogue (`envs/triage/catalogue.py`)
+If the analyst opens any alert that belongs to an attack, **the whole attack is stopped**. Stop it early and you score points. Let it reach ransomware and you lose a lot of points.
 
-`stage` is the kill-chain stage this rule reports when an attack fires it (– = never fired by attacks, pure noise). `noise_freq` is the share of noise alerts that come from this rule (sums to 1).
+The agent's job: learn which alerts are worth opening, and when.
 
-| rule_id | severity | source | stage | noise_freq |
-|---|---|---|---|---|
-| `phishing_link_clicked` | 3 | email | 1 initial access | 0.10 |
-| `off_hours_login` | 1 | identity | 1 initial access | 0.14 |
-| `new_admin_account` | 2 | identity | 2 foothold | 0.02 |
-| `cloud_key_new_asn` | 2 | cloud | 2 foothold | 0.02 |
-| `internal_port_scan` | 4 | ids | 3 spread | 0.12 |
-| `mass_file_rename` | 5 | edr | 4 impact | 0.01 |
-| `av_signature_hit` | 5 | edr | – | 0.16 |
-| `encoded_powershell` | 4 | edr | – | 0.06 |
-| `impossible_travel` | 3 | identity | – | 0.10 |
-| `failed_login_burst` | 3 | identity | – | 0.12 |
-| `dns_new_domain` | 2 | ids | – | 0.07 |
-| `usb_device_inserted` | 1 | edr | – | 0.08 |
+**The story we want to tell:** "sort by severity" loves `mass_file_rename` (severity 5), so it catches ransomware *after* the files are already encrypted. A good analyst (or agent) hunts the quiet early signs instead.
 
-Rough precision per shift (attack alerts ÷ all alerts of that rule): phishing ≈ 14%, new admin ≈ 40%, port scan ≈ 15%, mass rename ≈ 60% but always too late. So there is no free answer: early rules are noisy, precise rules come late.
+All data is synthetic. Every number below is an assumption, and we say so in the README and the article.
 
-## 3. Generation (`envs/triage/generator.py`)
+## 2. Glossary
 
-**Noise.** 9 noise alerts per step, rule drawn from `noise_freq`, machine criticality from `{1: 0.50, 2: 0.35, 3: 0.15}`.
-
-**Attacks.** At `reset`:
-- Number of attacks: uniform on {2, 3, 4}.
-- Start step: uniform on {0, …, 5}.
-- Target machine criticality: `{1: 0.20, 2: 0.30, 3: 0.50}` (attackers prefer important machines, so criticality is a weak signal).
-- At its start step an attack enters stage 1 and fires one alert from a stage-1 rule (chosen uniformly).
-- Each following step, an uncontained attack advances one stage with probability `p_advance = 0.6` and fires one alert from a rule of the new stage.
-- Entering stage 4 = impact (ransomware). The attack stays uncontained-at-impact for scoring.
-
-All randomness comes from the `np.random.Generator` the env owns, seeded in `reset(seed=...)`. No global RNG.
-
-## 4. Step order (`envs/triage/env.py`)
-
-At `reset`: generate attacks, then run arrivals for step 0, then return the first observation.
-
-Each `step(action)`:
-1. Open one alert of rule `action`: highest criticality first, then most recent arrival, then lowest `alert_id`.
-2. If it belongs to an attack: contain it, remove that attack's other queued alerts, pay the containment reward (§5) based on the attack's **current** stage.
-3. Uncontained attacks try to advance (§3). Any attack entering stage 4 pays the impact penalty.
-4. New alerts arrive (noise + attack stage alerts).
-5. `step += 1`. After 10 actions the shift ends: apply the end-of-shift penalty, `terminated = True`.
-
-`terminated` (not `truncated`) at the end of the shift, because the horizon is part of the task and the step counter is in the observation.
-
-## 5. Reward
-
-| Event | Reward |
+| Word | Meaning |
 |---|---|
-| Contain an attack at stage 1–2 | +1.0 |
-| Contain at stage 3 | +0.5 |
-| Open the alert of an attack already at stage 4 | +0.2 |
-| An attack enters stage 4 while uncontained | −5.0 |
-| False alarm | 0 |
-| **End of shift: each attack still live (uncontained, below stage 4)** | **−1.0** |
+| **Shift** | One round of the game (one analyst work day). Starts, runs 10 turns, ends with a score. |
+| **Turn (step)** | One move inside a shift. Each turn: the analyst opens one alert, attacks may advance, new alerts arrive. |
+| **Alert** | One line in the SOC inbox, e.g. "phishing link clicked on PC-42". |
+| **Alert type (rule)** | The kind of alert. There are 12. The agent picks a type; the game picks which alert of that type. |
+| **Attack** | A hidden real attacker. Moves through 4 stages and creates one alert at each stage. |
+| **Stage** | 1 gets in → 2 settles in → 3 spreads → 4 ransomware. |
+| **Contain / stop** | Opening any alert of an attack stops the whole attack. |
+| **Reward** | Points the agent gets after each turn. |
+| **Episode** | RL word for one shift. |
+| **Observation** | What the agent sees each turn: counts of waiting alerts, new arrivals, the turn number. Never which alerts are real. |
+| **Mask** | Greys out impossible choices (alert types with nothing in the inbox). |
+| **Seed** | Number that fixes the random dice. Same seed = same shift. |
+| **Baseline** | A simple player we compare the agent against. |
+| **Training** | The agent plays thousands of shifts and improves. |
 
-The last row closes a loophole: without it, the agent learns to ignore attacks that start late because they can't reach stage 4 before the shift ends.
+## 3. One shift, step by step (example)
 
-## 6. Observation and action (Gymnasium API)
+- **Turn 1:** 10 alerts arrive. Hidden inside: a phishing click from attack A (stage 1). The agent opens an AV hit → false alarm, 0 points. Attack A advances to stage 2 and creates a "new admin account" alert.
+- **Turn 2:** the agent opens the "new admin account" alert → it's attack A → **attack A stopped, +1**.
+- **Turns 3–6:** attack B starts on turn 3. The agent keeps opening false alarms. On turn 6, attack B reaches ransomware → **−5**.
+- **Turn 10:** shift ends. Attack C started late and is still running → **−1**.
+- **Score:** +1 − 5 − 1 = **−5**.
+
+The −5 on turn 6 was caused by what the agent skipped on turns 3–4. Learning that link by itself is what makes this real RL, and what a simple bandit cannot do.
+
+## 4. Game rules (Ali)
+
+### 4.1 Shift shape
+
+| Setting | Value |
+|---|---|
+| Turns per shift | 10 |
+| False-alarm alerts arriving per turn | 9 (plus any attack alerts) |
+| Alerts opened per turn | 1 |
+| Unopened alerts | Stay in the inbox for later turns |
+
+### 4.2 Attacks
+
+| Setting | Value |
+|---|---|
+| Attacks per shift | Random: 2, 3 or 4 |
+| Start turn | Random: turn 1 to 6 (step index 0–5) |
+| Speed | Each turn, an unstopped attack has a **60%** chance to move to the next stage (`p_advance = 0.6`) |
+| Alerts | Exactly 1 alert each time an attack enters a stage, from an alert type of that stage (chosen at random if there are two) |
+| Target machine importance | 1: 20%, 2: 30%, 3: 50% (attackers prefer important machines) |
+| After ransomware | The attack stays at stage 4. Opening its alert still gives +0.2 |
+
+### 4.3 The 12 alert types (`envs/triage/catalogue.py`)
+
+`noise_freq` = share of false alarms that are of this type (sums to 1). False alarms land on machines of importance 1: 50%, 2: 35%, 3: 15%.
+
+| rule_id | severity | source | attack stage | noise_freq | In plain words |
+|---|---|---|---|---|---|
+| `phishing_link_clicked` | 3 | email | 1 | 0.10 | Very noisy early sign |
+| `off_hours_login` | 1 | identity | 1 | 0.14 | Very noisy early sign |
+| `new_admin_account` | 2 | identity | 2 | 0.02 | Rare false alarm → good clue |
+| `cloud_key_new_asn` | 2 | cloud | 2 | 0.02 | Rare false alarm → good clue |
+| `internal_port_scan` | 4 | ids | 3 | 0.12 | Noisy, but means ransomware is close |
+| `mass_file_rename` | 5 | edr | 4 | 0.01 | Almost always real, always too late |
+| `av_signature_hit` | 5 | edr | – | 0.16 | Loud noise |
+| `encoded_powershell` | 4 | edr | – | 0.06 | Noise |
+| `impossible_travel` | 3 | identity | – | 0.10 | Noise |
+| `failed_login_burst` | 3 | identity | – | 0.12 | Noise |
+| `dns_new_domain` | 2 | ids | – | 0.07 | Noise |
+| `usb_device_inserted` | 1 | edr | – | 0.08 | Noise |
+
+Design rule if we tune these: **early alert types stay noisy, late ones stay reliable.** Otherwise there is no tradeoff to learn.
+
+### 4.4 What happens in one turn (exact order)
+
+At `reset`: create the attacks, run the arrivals for turn 1, return the first observation.
+
+On each `step(action)`:
+
+1. **Open** one alert of type `action`: most important machine first, then most recent, then lowest `alert_id`.
+2. If it belongs to an attack: **stop the attack**, remove that attack's other alerts from the inbox, give the reward for the attack's **current** stage.
+3. Unstopped attacks **try to advance** (60%). Any attack reaching stage 4 gives −5.
+4. **New alerts arrive** (9 false alarms + attack alerts from step 3 and attacks starting this turn).
+5. Turn counter +1. After the 10th action the shift ends: −1 per attack still running below stage 4, `terminated = True`.
+
+### 4.5 Points (reward)
+
+| What happens | Points |
+|---|---|
+| Stop an attack at stage 1 or 2 | +1 |
+| Stop it at stage 3 | +0.5 |
+| Open it when it's already at ransomware (stage 4) | +0.2 |
+| An attack reaches ransomware | **−5** |
+| An attack is still running when the shift ends | −1 |
+| Open a false alarm | 0 |
+
+Why the −1: without it, the agent learns to ignore attacks that start late, because they can't reach ransomware before the shift ends.
+
+## 5. Interface between game and players (frozen)
+
+Rayane codes against this from minute one, using a fake env until the real one is merged. **Changing it needs both of us to agree.**
 
 | Item | Definition |
 |---|---|
-| Action space | `Discrete(12)`, index = row in the catalogue |
-| `action_masks()` | `bool[12]`: true if at least one alert of that rule is in the queue |
+| Class | `cyberforge.envs.triage.env.TriageEnv(gymnasium.Env)` |
+| Settings | `TriageConfig`: frozen dataclass with the defaults from §4 (no YAML this week) |
+| Catalogue | `cyberforge.envs.triage.catalogue.CATALOGUE`: tuple of 12 `RuleSpec(rule_id, severity, source, stage, noise_freq)` in the order of §4.3 |
+| Action space | `Discrete(12)`: index = row in `CATALOGUE` |
+| `action_masks()` | `np.ndarray[bool]` of shape (12,): true if at least one alert of that type is in the inbox |
 | Observation space | `Box(0, inf, (49,), float32)` |
-| Observation layout | `queued[rule, criticality]` counts (36) + `arrived_this_step[rule]` counts (12) + `step / 10` (1); counts scaled by 1/10 |
-| `reset(seed, options)` | returns `(obs, info)` |
-| `step(action)` | returns `(obs, reward, terminated, truncated, info)` |
-| `info` | `attacks_total`, `contained_early` (stage 1–2), `contained_stage3`, `reached_impact`, `false_alarms` (cumulative this shift) |
-| Hidden state | `env.hidden_view()` returns a read-only snapshot (attack stages + which queued alerts belong to which attack). **Only the oracle may use it.** |
+| Observation layout | `[0:36]` waiting alerts per (type, importance 1–3), row-major by type · `[36:48]` alerts of each type that arrived this turn · `[48]` turn / 10 · all counts × 0.1 |
+| `reset(seed=None, options=None)` | returns `(obs, info)` |
+| `step(action)` | returns `(obs, reward, terminated, truncated, info)`; `truncated` is always `False` |
+| `info` | `attacks_total`, `contained_early` (stage 1–2), `contained_stage3`, `reached_impact`, `false_alarms` (running totals for this shift) |
+| `hidden_view()` | Read-only snapshot of the truth: each attack's stage and status, and which waiting alerts belong to which attack. **Only the oracle may use it.** |
+| Invalid action | Mask is false → raise `InvalidActionError` |
+| Must pass | `gymnasium.utils.env_checker.check_env` |
 
-The agent cannot see which alerts belong to attacks, so this is formally a POMDP. Treating the observation as the state is standard here.
+Randomness: only from the env's own generator, seeded by `reset(seed=...)`. No global random.
 
-Invalid action (mask false) raises `InvalidActionError`. Must pass `gymnasium.utils.env_checker.check_env`.
+The agent can't see which alerts are real, so this is formally a POMDP (partially observable). Treating the observation as the state is standard and fine here.
 
-## 7. Policies (`agents/`)
+## 6. Players (Rayane)
 
 ```python
 class Policy(Protocol):
@@ -99,45 +150,95 @@ class Policy(Protocol):
     ) -> int: ...
 ```
 
-| Policy | Uses | Picks | Written by hand? |
-|---|---|---|---|
-| Random | mask | Uniform over valid rules | yes |
-| Severity-first | catalogue severity + queue | Highest severity, then criticality | yes |
-| Bandit (fixed) | per-rule mean reward estimated once by Monte Carlo (10k random shifts) | Greedy on that estimate | yes |
-| Bandit (learned, ε-greedy) | its own running estimates | ε-greedy on per-rule mean reward, learns online | **yes: the update rule is the hand-written core of the week** |
-| Smart analyst | domain knowledge only (stage rules, no hidden state) | Open stage-2 rules if present, else stage-1, else stage-3, else bandit | yes |
-| Oracle | `hidden_view()` | Attack alert of the most advanced pre-impact attack; else any attack alert; else random | yes |
-| **MaskablePPO** | obs + mask | Learned (`sb3-contrib`, `MlpPolicy`) | library |
-
-## 8. Training and evaluation (`eval/`)
-
-- **Training:** MaskablePPO, default hyperparameters first. 50,000 shifts (= 500k steps) per run, 5 seeds. Log episodic return every 1,000 shifts. If the curve hasn't flattened, go to 100k shifts.
-- **Evaluation:** every policy on the same **1,000 held-out shifts**, seeds `1_000_000 + i`. PPO with `deterministic=True` and masks. Same config + seeds ⇒ byte-identical `results.json`.
-- **Headline metric:** **attacks stopped before impact, per shift** (contained at stage 1–3), with 95% CI.
-- Also report: attacks reaching impact per shift, mean return, false alarms opened, breakdown by containment stage.
-
-## 9. Sanity checks before training PPO
-
-| # | Check | Pass if |
+| Player | How it plays | Why it's here |
 |---|---|---|
-| S1 | Oracle vs severity-first | Oracle stops ≥ 1 more attack per shift |
-| S2 | Smart analyst vs fixed bandit | Smart analyst clearly better (non-overlapping CIs). If not, tune the game: stronger penalty, quieter early stages |
-| S3 | No trivial answer | Every single-rule policy ("always open phishing if present, else random") is clearly below the smart analyst |
+| Random | Any allowed type | Floor |
+| Severity-first | Highest severity among allowed types, then most important machine | "A simplified SOC today" |
+| Learned bandit | Running average points per alert type, ε-greedy. **Update rule written by hand.** | **The key opponent.** Only looks at points right now. If PPO doesn't beat it, the RL claim fails |
+| Smart analyst | Stage-2 types if any, else stage 3, else stage 1, else bandit | Expert rule. Stage 3 before stage 1 because ransomware is one step away |
+| Always-phishing | Phishing if any, else random | Checks there's no trivial answer |
+| Oracle | Uses `hidden_view()`: opens an alert of the attack closest to ransomware | Upper bound |
+| **MaskablePPO** | `sb3-contrib`, `MlpPolicy`, default settings first | The agent |
 
-If a hand-written rule can't beat the bandit, PPO won't either. Fix the game first.
+## 7. Training and testing
 
-## 10. Plots
+| Item | Value |
+|---|---|
+| Training | MaskablePPO, **3 seeds × 30,000 shifts** (300k steps each), in parallel, ~20 min on the M4. Log the average shift score every 1,000 shifts. |
+| Testing | Every player plays the **same 1,000 new shifts** (seeds `1_000_000 + i`). PPO plays with `deterministic=True` and masks. |
+| **Headline number** | **Attacks stopped before ransomware, per shift** (stopped at stage 1–3), with 95% CI |
+| Also report | Attacks that reached ransomware per shift, average shift score, false alarms opened, breakdown by stage stopped |
+| Output | `experiments/w01_triage/results.json` (deterministic, sorted keys) + plots. Models are git-ignored. |
 
-1. PPO learning curve (return vs shifts trained, mean ± std over 5 seeds) with baselines as horizontal lines.
-2. Attacks stopped before impact per shift, per policy, with 95% CIs.
-3. Outcome breakdown per policy: contained early / at stage 3 / reached impact / still live at shift end.
-4. **Hero plot:** which rules each policy opens at each step (heatmap), PPO vs severity-first.
-5. Stretch: impact penalty ablation (−2, −5, −10).
+### Sanity checks before training PPO (together)
 
-## 11. Dependencies
+Every hand-written player plays 1,000 shifts.
 
-`gymnasium` (Track B, now), `stable-baselines3` + `sb3-contrib` + `torch` (Track A, when starting PPO).
+| Check | Passes if | If it fails |
+|---|---|---|
+| Oracle vs severity-first | Oracle stops ≥ 1 more attack per shift | Make early alert types less noisy |
+| Smart analyst vs bandit | Smart analyst clearly better | Raise −5, or slow attacks (`p_advance` 0.6 → 0.5) |
+| Always-phishing vs smart analyst | Clearly worse | Make phishing noisier |
 
-## 12. Out of scope this week
+Tune **once** (max 15 min). If it still fails, train anyway and write the honest result.
 
-LLMs (W3), real logs (W11), hyperparameter sweeps beyond the penalty ablation.
+### Plots
+
+1. PPO learning curve (score vs shifts played, mean ± spread over 3 seeds), baselines as flat lines.
+2. Attacks stopped before ransomware, per player, with 95% CIs.
+3. **Hero plot:** which alert types each player opens at each turn (heatmap), PPO vs severity-first.
+
+## 8. Files and ownership
+
+| Path | Owner |
+|---|---|
+| `src/cyberforge/envs/triage/types.py`, `catalogue.py`, `generator.py`, `env.py`, `config.py` | Ali |
+| `src/cyberforge/agents/` (policies, bandit, smart analyst, oracle) | Rayane |
+| `src/cyberforge/training/train_ppo.py` | Rayane |
+| `src/cyberforge/eval/` (runner, metrics, plots) | Rayane |
+| `tests/` | Whoever owns the code under test |
+| `README.md`, game diagram | Ali |
+| Article | Both: Ali the security parts, Rayane the RL parts |
+
+Hand-written by humans (AI may write tests and boilerplate): **Ali** the containment + reward logic, **Rayane** the bandit update rule.
+
+## 9. Today's plan (5 hours)
+
+| Time | Ali (game) | Rayane (players) |
+|---|---|---|
+| 0:00–0:15 | **Together:** read this spec, merge it | |
+| 0:15–0:40 | Skeleton: types, catalogue, `TriageEnv` with real spaces and placeholder logic, passes `check_env` | Read MaskablePPO docs, `uv add stable-baselines3 sb3-contrib torch`, fake env for tests |
+| **0:40** | **Sync 1:** skeleton PR merged | |
+| 0:40–1:30 | Generators: false alarms + attacks (tests first) | Random, severity-first, oracle, always-phishing (tests first, property test on masks) |
+| 1:30–2:15 | Turn logic, containment + reward (by hand), masks, `info` | Learned bandit (by hand) + smart analyst, then PPO training script |
+| **2:15** | **Sync 2:** real game merged | |
+| 2:15–2:45 | **Together:** sanity checks, tune once if needed | |
+| **2:45** | | **Launch PPO** (3 seeds, background) |
+| 2:45–3:45 | README, game diagram, article "SOC problem" + "game" sections, *bonus: play a shift by hand in the terminal* | Test runner on 1,000 shifts, results.json, plots (baselines first, then PPO) |
+| 3:45–4:30 | **Together:** read the results, agree on one sentence for the hero plot, write the article | |
+| 4:30–5:00 | **Together:** review, merge, tag `w01`, publish | |
+
+### If things go wrong
+
+| Problem | Fallback |
+|---|---|
+| Game not merged by 2:15 | Rayane keeps going on the fake env; push sync 2 by up to 30 min; drop the bonus |
+| PPO doesn't beat the bandit | Still an article: "when triage doesn't need RL, and what would change that (host context, next week)" |
+| PPO is slow | 1 seed, 20,000 shifts, say so in the article |
+| Late at 4:30 | Tag tonight, publish tomorrow. Never skip the tag |
+
+### Working with Claude Code
+
+- One session per person, each on their own branch (`w01/game`, `w01/agents`).
+- Always: "write tests from spec §X first, don't implement yet", then "implement until the tests pass".
+- Read every diff before opening a PR. The other person reviews within 5 minutes.
+
+## 10. Not this week
+
+Host names / correlating alerts on the same machine (W2), LLMs (W3), real logs (W11), YAML configs, hyperparameter sweeps.
+
+## 11. Changelog
+
+| When | Change | Why |
+|---|---|---|
+| W1 start | First version agreed by Ali and Rayane | – |
