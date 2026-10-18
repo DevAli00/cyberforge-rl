@@ -1,128 +1,143 @@
-# W1 spec: SOC alert triage environment
+# W1 spec: SOC alert triage with attacks that progress
 
-Status: **locked once this PR merges.** Any change after that goes through a PR that both tracks approve, because Track A codes against these interfaces in parallel.
+Status: **locked once PR #1 merges.** Any change after that goes through a PR approved by both tracks.
 
-## 1. Problem
+## 1. The game in one paragraph
 
-A SOC analyst gets a queue of ~100 alerts per shift and can only investigate a few. The agent picks which alerts to investigate. Reward is the number of real threats (true positives) found.
+A shift lasts 10 steps. Each step, about 10 new alerts arrive and the analyst (the agent) opens one. Hidden among the noise are 2–4 real attacks that move through a kill chain during the shift. Opening any alert that belongs to an attack contains the whole attack. Contain it early and you score; let it reach ransomware and you take a large penalty. Because opening a quiet early alert now prevents a disaster several steps later, this is a real sequential decision problem (credit assignment), not a bandit.
 
-The point of the week: **severity labels are miscalibrated** (loud rules are mostly noise, some quiet rules are often real), so a learning agent should beat "sort by severity" and approach an oracle.
+**The story:** severity-first triage loves `mass_file_rename` (severity 5), so it reliably catches ransomware *after* encryption has started. The agent should learn to hunt the quiet early stages.
 
-All data is synthetic. TP rates and frequencies below are assumptions, stated as such in the README and article.
+All data is synthetic. Every number below is an assumption, stated as such in the README and the article.
 
 ## 2. Rule catalogue (`envs/triage/catalogue.py`)
 
-`p_tp` is the true-positive probability for an asset of criticality 2. `freq` is the probability that an alert comes from this rule (sums to 1). `cost` is analyst-minutes to investigate (used by the v2 budget).
+`stage` is the kill-chain stage this rule reports when an attack fires it (– = never fired by attacks, pure noise). `noise_freq` is the share of noise alerts that come from this rule (sums to 1).
 
-| rule_id | severity | source | cost | p_tp | freq |
-|---|---|---|---|---|---|
-| `av_signature_hit` | 5 | edr | 5 | 0.02 | 0.15 |
-| `internal_port_scan` | 4 | ids | 4 | 0.03 | 0.12 |
-| `mass_file_rename` | 5 | edr | 5 | 0.45 | 0.02 |
-| `new_admin_account` | 2 | identity | 6 | 0.35 | 0.03 |
-| `cloud_key_new_asn` | 2 | cloud | 10 | 0.30 | 0.03 |
-| `encoded_powershell` | 4 | edr | 5 | 0.15 | 0.06 |
-| `impossible_travel` | 3 | identity | 6 | 0.04 | 0.10 |
-| `failed_login_burst` | 3 | identity | 6 | 0.03 | 0.12 |
-| `off_hours_login` | 1 | identity | 6 | 0.01 | 0.15 |
-| `dns_new_domain` | 2 | ids | 4 | 0.12 | 0.07 |
-| `phishing_link_clicked` | 3 | email | 3 | 0.15 | 0.08 |
-| `usb_device_inserted` | 1 | edr | 5 | 0.02 | 0.07 |
+| rule_id | severity | source | stage | noise_freq |
+|---|---|---|---|---|
+| `phishing_link_clicked` | 3 | email | 1 initial access | 0.10 |
+| `off_hours_login` | 1 | identity | 1 initial access | 0.14 |
+| `new_admin_account` | 2 | identity | 2 foothold | 0.02 |
+| `cloud_key_new_asn` | 2 | cloud | 2 foothold | 0.02 |
+| `internal_port_scan` | 4 | ids | 3 spread | 0.12 |
+| `mass_file_rename` | 5 | edr | 4 impact | 0.01 |
+| `av_signature_hit` | 5 | edr | – | 0.16 |
+| `encoded_powershell` | 4 | edr | – | 0.06 |
+| `impossible_travel` | 3 | identity | – | 0.10 |
+| `failed_login_burst` | 3 | identity | – | 0.12 |
+| `dns_new_domain` | 2 | ids | – | 0.07 |
+| `usb_device_inserted` | 1 | edr | – | 0.08 |
 
-Expected base rate ≈ 7.5% at criticality 2.
-
-Back-of-envelope with budget = 10: random ≈ 0.75 TP/shift, severity-sort ≈ 0.7, oracle ≈ 3.1. That gap is the article. **Gap check at 2:30** confirms it empirically.
-
-With the v2 minute budget, the ranking changes because of cost: `phishing_link_clicked` (0.15 / 3 min) beats `cloud_key_new_asn` (0.30 / 10 min) per minute, and near the end of the shift only cheap rules fit. That is what makes v2 a real MDP.
+Rough precision per shift (attack alerts ÷ all alerts of that rule): phishing ≈ 14%, new admin ≈ 40%, port scan ≈ 15%, mass rename ≈ 60% but always too late. So there is no free answer: early rules are noisy, precise rules come late.
 
 ## 3. Generation (`envs/triage/generator.py`)
 
-- Asset criticality ∈ {1, 2, 3} with probabilities {0.50, 0.35, 0.15}.
-- `P(TP) = sigmoid(logit(p_tp[rule]) + criticality_effect * (criticality - 2))`, `criticality_effect = 0.5`.
-- One shift = `n_alerts` alerts, rule drawn from `freq`, label drawn from `P(TP)`.
-- All randomness comes from the `np.random.Generator` passed in. No global RNG, ever.
+**Noise.** 9 noise alerts per step, rule drawn from `noise_freq`, machine criticality from `{1: 0.50, 2: 0.35, 3: 0.15}`.
 
-## 4. Types (`envs/triage/types.py`)
+**Attacks.** At `reset`:
+- Number of attacks: uniform on {2, 3, 4}.
+- Start step: uniform on {0, …, 5}.
+- Target machine criticality: `{1: 0.20, 2: 0.30, 3: 0.50}` (attackers prefer important machines, so criticality is a weak signal).
+- At its start step an attack enters stage 1 and fires one alert from a stage-1 rule (chosen uniformly).
+- Each following step, an uncontained attack advances one stage with probability `p_advance = 0.6` and fires one alert from a rule of the new stage.
+- Entering stage 4 = impact (ransomware). The attack stays uncontained-at-impact for scoring.
 
-All frozen dataclasses (or pydantic models with `frozen=True`).
+All randomness comes from the `np.random.Generator` the env owns, seeded in `reset(seed=...)`. No global RNG.
 
-| Type | Fields |
+## 4. Step order (`envs/triage/env.py`)
+
+At `reset`: generate attacks, then run arrivals for step 0, then return the first observation.
+
+Each `step(action)`:
+1. Open one alert of rule `action`: highest criticality first, then most recent arrival, then lowest `alert_id`.
+2. If it belongs to an attack: contain it, remove that attack's other queued alerts, pay the containment reward (§5) based on the attack's **current** stage.
+3. Uncontained attacks try to advance (§3). Any attack entering stage 4 pays the impact penalty.
+4. New alerts arrive (noise + attack stage alerts).
+5. `step += 1`. After 10 actions the shift ends: apply the end-of-shift penalty, `terminated = True`.
+
+`terminated` (not `truncated`) at the end of the shift, because the horizon is part of the task and the step counter is in the observation.
+
+## 5. Reward
+
+| Event | Reward |
 |---|---|
-| `Source` | `StrEnum`: `edr`, `ids`, `identity`, `cloud`, `email` |
-| `RuleSpec` | `rule_id: str`, `severity: int` (1–5), `source: Source`, `cost: int`, `p_tp: float`, `freq: float` |
-| `Alert` | `alert_id: int`, `rule_id: str`, `severity: int`, `source: Source`, `criticality: int`, `cost: int`, `is_true_positive: bool` |
-| `AlertView` | Same as `Alert` **without** `is_true_positive`. This is all an agent ever sees. |
-| `Observation` | `queue: tuple[AlertView, ...]` (uninvestigated alerts), `budget_remaining: int`, `step: int` |
-| `StepInfo` | `alert_id: int`, `rule_id: str`, `is_true_positive: bool`, `cost: int` |
-| `StepResult` | `observation: Observation`, `reward: float`, `terminated: bool`, `info: StepInfo` |
-| `Transition` | `observation`, `action: str`, `reward: float`, `next_observation`, `terminated: bool` |
+| Contain an attack at stage 1–2 | +1.0 |
+| Contain at stage 3 | +0.5 |
+| Open the alert of an attack already at stage 4 | +0.2 |
+| An attack enters stage 4 while uncontained | −5.0 |
+| False alarm | 0 |
+| **End of shift: each attack still live (uncontained, below stage 4)** | **−1.0** |
 
-Helper: `valid_actions(obs) -> frozenset[str]` returns rule_ids that have at least one alert in the queue **and** whose cost fits `budget_remaining`.
+The last row closes a loophole: without it, the agent learns to ignore attacks that start late because they can't reach stage 4 before the shift ends.
 
-## 5. Environment (`envs/triage/env.py`)
+## 6. Observation and action (Gymnasium API)
 
-| Item | Contract |
+| Item | Definition |
 |---|---|
-| Construction | `TriageEnv(config: TriageConfig, catalogue: tuple[RuleSpec, ...])` |
-| `reset(seed: int) -> Observation` | Generates a new shift from `np.random.default_rng(seed)`. |
-| `step(action: str) -> StepResult` | `action` is a `rule_id`. The env investigates the uninvestigated alert of that rule with the **highest criticality, ties broken by lowest `alert_id`**. |
-| Reward | `1.0` if TP else `0.0`. Variant (config): multiply by criticality. |
-| Budget | `budget_unit="count"` (v1): each step costs 1. `budget_unit="minutes"` (v2): each step costs the alert's `cost`. |
-| Invalid action | Not in `valid_actions(obs)` → raise `InvalidActionError`. Agents must only pick valid actions. |
-| Termination | `valid_actions` is empty (budget spent, queue empty, or nothing affordable). |
-| Hidden truth | `Alert.is_true_positive` is revealed only in `StepInfo` after investigation, and to evaluation code via `env.shift_alerts` (read-only tuple) for recall. |
+| Action space | `Discrete(12)`, index = row in the catalogue |
+| `action_masks()` | `bool[12]`: true if at least one alert of that rule is in the queue |
+| Observation space | `Box(0, inf, (49,), float32)` |
+| Observation layout | `queued[rule, criticality]` counts (36) + `arrived_this_step[rule]` counts (12) + `step / 10` (1); counts scaled by 1/10 |
+| `reset(seed, options)` | returns `(obs, info)` |
+| `step(action)` | returns `(obs, reward, terminated, truncated, info)` |
+| `info` | `attacks_total`, `contained_early` (stage 1–2), `contained_stage3`, `reached_impact`, `false_alarms` (cumulative this shift) |
+| Hidden state | `env.hidden_view()` returns a read-only snapshot (attack stages + which queued alerts belong to which attack). **Only the oracle may use it.** |
 
-The env is stateful by nature (it owns the current shift). Everything it returns is immutable.
+The agent cannot see which alerts belong to attacks, so this is formally a POMDP. Treating the observation as the state is standard here.
 
-## 6. Config (`envs/triage/config.py`, `configs/w01_triage.yaml`)
+Invalid action (mask false) raises `InvalidActionError`. Must pass `gymnasium.utils.env_checker.check_env`.
 
-Pydantic `TriageConfig(frozen=True)`:
-
-| Field | Default |
-|---|---|
-| `n_alerts` | 100 |
-| `budget` | 10 (v1) / 60 (v2) |
-| `budget_unit` | `"count"` or `"minutes"` |
-| `criticality_effect` | 0.5 |
-| `reward_by_criticality` | `false` |
-
-## 7. Agents (`agents/`)
+## 7. Policies (`agents/`)
 
 ```python
-class Agent(Protocol):
+class Policy(Protocol):
     name: str
 
-    def act(self, observation: Observation, rng: np.random.Generator) -> str: ...
-    def update(self, transition: Transition) -> None: ...
+    def act(
+        self, obs: NDArray[np.float32], action_mask: NDArray[np.bool_], rng: np.random.Generator
+    ) -> int: ...
 ```
 
-- Learning agents keep their estimates **across shifts** (one agent instance per run). Their internal tables are the only mutable state, and that is intentional.
-- Non-learning agents implement `update` as a no-op.
+| Policy | Uses | Picks | Written by hand? |
+|---|---|---|---|
+| Random | mask | Uniform over valid rules | yes |
+| Severity-first | catalogue severity + queue | Highest severity, then criticality | yes |
+| Bandit (fixed) | per-rule mean reward estimated once by Monte Carlo (10k random shifts) | Greedy on that estimate | yes |
+| Bandit (learned, ε-greedy) | its own running estimates | ε-greedy on per-rule mean reward, learns online | **yes: the update rule is the hand-written core of the week** |
+| Smart analyst | domain knowledge only (stage rules, no hidden state) | Open stage-2 rules if present, else stage-1, else stage-3, else bandit | yes |
+| Oracle | `hidden_view()` | Attack alert of the most advanced pre-impact attack; else any attack alert; else random | yes |
+| **MaskablePPO** | obs + mask | Learned (`sb3-contrib`, `MlpPolicy`) | library |
 
-| Agent | Receives at construction | Picks |
+## 8. Training and evaluation (`eval/`)
+
+- **Training:** MaskablePPO, default hyperparameters first. 50,000 shifts (= 500k steps) per run, 5 seeds. Log episodic return every 1,000 shifts. If the curve hasn't flattened, go to 100k shifts.
+- **Evaluation:** every policy on the same **1,000 held-out shifts**, seeds `1_000_000 + i`. PPO with `deterministic=True` and masks. Same config + seeds ⇒ byte-identical `results.json`.
+- **Headline metric:** **attacks stopped before impact, per shift** (contained at stage 1–3), with 95% CI.
+- Also report: attacks reaching impact per shift, mean return, false alarms opened, breakdown by containment stage.
+
+## 9. Sanity checks before training PPO
+
+| # | Check | Pass if |
 |---|---|---|
-| `RandomAgent` | – | Uniform over `valid_actions` |
-| `SeveritySortAgent` | – | Highest severity in the queue, then highest criticality |
-| `OracleAgent` | catalogue (incl. `p_tp`) + `criticality_effect` | Highest expected TP of the alert that would actually be investigated (v2: per minute) |
-| `EpsilonGreedyAgent` | `epsilon` | Per-rule mean reward estimates |
-| `UCB1Agent` | `c` | Untried valid rules first, then mean + c·sqrt(ln t / n) |
-| `QLearningAgent` | `alpha`, `epsilon`, `gamma=1.0`, bucket size | State = `budget_remaining` bucket, action = rule |
+| S1 | Oracle vs severity-first | Oracle stops ≥ 1 more attack per shift |
+| S2 | Smart analyst vs fixed bandit | Smart analyst clearly better (non-overlapping CIs). If not, tune the game: stronger penalty, quieter early stages |
+| S3 | No trivial answer | Every single-rule policy ("always open phishing if present, else random") is clearly below the smart analyst |
 
-## 8. Runner, metrics, seeds (`eval/`)
+If a hand-written rule can't beat the bandit, PPO won't either. Fix the game first.
 
-- One run = one agent × one seed × `n_shifts` (default 500).
-- Shift `i` of run seed `s` uses env seed derived from `np.random.SeedSequence([s, i])`. The agent gets one RNG per run from `SeedSequence([s, 1_000_000])`. Same config + seed ⇒ byte-identical `results.json`.
-- Per-shift metrics: `tp_caught`, `tp_present`, `recall = tp_caught / tp_present` (NaN-safe when 0), `oracle_expected_tp`, `regret = oracle_expected_tp - tp_caught_expected`.
-- Grid: 6 agents (+ hyper-param variants) × 5 seeds × 500 shifts. Output: `experiments/w01_triage/results.json` + `plots/`.
+## 10. Plots
 
-## 9. Plots
+1. PPO learning curve (return vs shifts trained, mean ± std over 5 seeds) with baselines as horizontal lines.
+2. Attacks stopped before impact per shift, per policy, with 95% CIs.
+3. Outcome breakdown per policy: contained early / at stage 3 / reached impact / still live at shift end.
+4. **Hero plot:** which rules each policy opens at each step (heatmap), PPO vs severity-first.
+5. Stretch: impact penalty ablation (−2, −5, −10).
 
-1. Learning curves: TP caught per shift (rolling mean ± std over seeds).
-2. Cumulative regret vs oracle.
-3. Final recall per agent, bars with 95% CIs.
-4. **Hero plot:** learned per-rule value vs true `p_tp`, colored by severity.
-5. (v2) Q-learning: preferred rule vs remaining minutes.
+## 11. Dependencies
 
-## 10. Out of scope this week
+`gymnasium` (Track B, now), `stable-baselines3` + `sb3-contrib` + `torch` (Track A, when starting PPO).
 
-Gymnasium API (W2), neural networks (W2), real data (W11), LLMs (W3).
+## 12. Out of scope this week
+
+LLMs (W3), real logs (W11), hyperparameter sweeps beyond the penalty ablation.
