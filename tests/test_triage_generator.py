@@ -11,6 +11,7 @@ from cyberforge.envs.triage.config import TriageConfig
 from cyberforge.envs.triage.generator import (
     draw_attacks,
     draw_false_alarms,
+    shuffle_arrivals,
     start_attack,
     try_advance,
 )
@@ -180,3 +181,16 @@ def test_global_numpy_random_is_never_used() -> None:
     first = draw_false_alarms(_rng(1), CONFIG, 0, 0)
     np.random.seed(999)
     assert draw_false_alarms(_rng(1), CONFIG, 0, 0) == first
+
+
+def test_shuffle_arrivals_keeps_alerts_and_ids() -> None:
+    alerts = draw_false_alarms(_rng(), CONFIG, turn=2, first_id=40)
+    shuffled = shuffle_arrivals(_rng(1), alerts)
+    assert [a.alert_id for a in shuffled] == [a.alert_id for a in alerts]  # same ids, in order
+    strip = lambda a: (a.rule_index, a.importance, a.turn, a.attack_id)  # noqa: E731
+    assert sorted(map(strip, shuffled)) == sorted(map(strip, alerts))  # same alerts
+
+
+def test_shuffle_arrivals_mixes_the_order() -> None:
+    alerts = tuple(draw_false_alarms(_rng(), TriageConfig(noise_per_turn=30), 0, 0))
+    assert shuffle_arrivals(_rng(1), alerts) != alerts

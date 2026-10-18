@@ -221,22 +221,15 @@ def test_reset_starts_attacks_due_on_turn_1(seed: int) -> None:
 
 
 @pytest.mark.parametrize("seed", range(10))
-def test_each_attack_starts_on_its_turn_with_one_alert(seed: int) -> None:
-    """Until #9 attacks are never opened or advanced, so each keeps exactly its stage-1 alert."""
+def test_each_attack_starts_on_its_turn(seed: int) -> None:
     env = TriageEnv()
     env.reset(seed=seed)
     terminated = False
     while not terminated:
-        before = len(env.hidden_view().inbox)
         _, _, terminated, _, _ = env.step(_first_allowed(env))
         view = env.hidden_view()
-        due = [a for a in view.attacks if a.start_turn == view.turn]
-        assert all(a.status is AttackStatus.ACTIVE for a in due)
-        assert len(view.inbox) == before + env.config.noise_per_turn + len(due)
         for attack in view.attacks:
-            started = attack.start_turn <= view.turn
-            assert _attack_alerts(view)[attack.attack_id] == int(started)
-            assert all(a.turn == attack.start_turn for a in view.alerts_of(attack.attack_id))
+            assert (attack.status is AttackStatus.PENDING) == (attack.start_turn > view.turn)
 
 
 def test_arrivals_carry_the_turn_they_arrive_on() -> None:

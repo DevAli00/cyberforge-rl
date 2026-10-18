@@ -4,6 +4,9 @@ Pure functions: randomness only from the `rng` passed in (the env's own generato
 return new frozen objects instead of changing their inputs.
 """
 
+from collections.abc import Sequence
+from dataclasses import replace
+
 import numpy as np
 
 from cyberforge.envs.triage.catalogue import CATALOGUE, N_RULES, RULES_BY_STAGE
@@ -86,4 +89,14 @@ def _stage_alert(rng: np.random.Generator, attack: Attack, turn: int, alert_id: 
         importance=attack.importance,
         turn=turn,
         attack_id=attack.attack_id,
+    )
+
+
+def shuffle_arrivals(rng: np.random.Generator, arrivals: Sequence[Alert]) -> tuple[Alert, ...]:
+    """Mix a turn's arrivals in random order, then give them their ids again in that order, so
+    the lowest-id tie-break (§4.4 step 1) favours neither false alarms nor attack alerts."""
+    ids = sorted(alert.alert_id for alert in arrivals)
+    order = rng.permutation(len(arrivals))
+    return tuple(
+        replace(arrivals[int(i)], alert_id=new_id) for i, new_id in zip(order, ids, strict=True)
     )
