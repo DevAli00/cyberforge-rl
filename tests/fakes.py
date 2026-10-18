@@ -15,6 +15,8 @@ import numpy as np
 from gymnasium import spaces
 from numpy.typing import NDArray
 
+from cyberforge.agents.oracle import HiddenView
+
 N_TYPES = 12
 N_IMPORTANCE = 3
 OBS_SIZE = N_TYPES * N_IMPORTANCE + N_TYPES + 1  # 49
@@ -64,6 +66,7 @@ class FakeTriageEnv(gym.Env[NDArray[np.float32], np.int64]):
         self._obs = np.zeros(OBS_SIZE, dtype=np.float32)
         self._info: dict[str, int] = {}
         self._attack_stages: list[int] = []
+        self._attack_alerts: list[list[int]] = []
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -95,14 +98,23 @@ class FakeTriageEnv(gym.Env[NDArray[np.float32], np.int64]):
     def action_masks(self) -> NDArray[np.bool_]:
         return self._mask.copy()
 
-    def hidden_view(self) -> dict[str, Any]:
-        """Fake truth snapshot (format not fixed by §5 yet). Oracle only."""
+    def hidden_view(self) -> HiddenView:
+        """Fake truth snapshot in the provisional format of `cyberforge.agents.oracle`.
+
+        §5 does not fix this format yet. Oracle only.
+        """
         return {
             "attacks": [
-                {"attack_id": i, "stage": stage, "status": "running"}
-                for i, stage in enumerate(self._attack_stages)
-            ],
-            "alert_owner": {},
+                {
+                    "attack_id": i,
+                    "stage": stage,
+                    "stopped": False,
+                    "waiting_alert_types": list(alerts),
+                }
+                for i, (stage, alerts) in enumerate(
+                    zip(self._attack_stages, self._attack_alerts, strict=True)
+                )
+            ]
         }
 
     def _draw(self) -> None:
@@ -124,3 +136,8 @@ class FakeTriageEnv(gym.Env[NDArray[np.float32], np.int64]):
         obs[-1] = self._turn / TURNS_PER_SHIFT
         self._mask = mask
         self._obs = obs
+        # Each attack owns at most one waiting alert, always of an allowed type.
+        allowed = np.flatnonzero(mask)
+        self._attack_alerts = [
+            [int(rng.choice(allowed))] if rng.random() < 0.7 else [] for _ in self._attack_stages
+        ]
