@@ -17,6 +17,8 @@ from numpy.typing import NDArray
 
 # The real catalogue (PR #22); the env below stays fake.
 from cyberforge.envs.triage.catalogue import CATALOGUE as CATALOGUE
+from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.observation import observation_high
 
 N_TYPES = 12
 N_IMPORTANCE = 3
@@ -62,7 +64,7 @@ class FakeTriageEnv(gym.Env[NDArray[np.float32], np.int64]):
     def __init__(self) -> None:
         self.action_space = spaces.Discrete(N_TYPES)
         self.observation_space = spaces.Box(
-            low=0.0, high=np.inf, shape=(OBS_SIZE,), dtype=np.float32
+            low=0.0, high=observation_high(TriageConfig()), shape=(OBS_SIZE,), dtype=np.float32
         )
         self._turn = 0
         self._mask = np.ones(N_TYPES, dtype=np.bool_)

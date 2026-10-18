@@ -244,3 +244,4 @@ Host names / correlating alerts on the same machine (W2), LLMs (W3), real logs (
 | W1 start | First version agreed by Ali and Rayane | – |
 | W1 skeleton (#3) | Observation space max: `inf` → exact per-number max from the config | `check_env` warns on an infinite max; a real bound also documents what the agent can see |
 | W1 skeleton (#3) | New file `observation.py` (inbox → 49 numbers, mask, max) | Small pure functions, tested alone; keeps `env.py` for the turn logic |
+| W1 agents (#23) | §6: players that learn while playing implement `LearningPolicy` = `Policy` + `update(action, reward)`; the runner calls it after every `step` | The `Policy` protocol had no way to receive points, which the learned bandit and the smart analyst need |
