@@ -126,7 +126,7 @@ Rayane codes against this from minute one, using a fake env until the real one i
 | Catalogue | `cyberforge.envs.triage.catalogue.CATALOGUE`: tuple of 12 `RuleSpec(rule_id, severity, source, stage, noise_freq)` in the order of §4.3 |
 | Action space | `Discrete(12)`: index = row in `CATALOGUE` |
 | `action_masks()` | `np.ndarray[bool]` of shape (12,): true if at least one alert of that type is in the inbox |
-| Observation space | `Box(0, inf, (49,), float32)` |
+| Observation space | `Box(0, high, (49,), float32)`, `high = observation.observation_high(config)`: the largest value each number can reach. Default config: 11.5 for waiting counts (11 arrival rounds × 9 false alarms + 4 attacks × 4 alerts = 115), 1.3 for arrivals (9 + 4), 1.0 for the turn |
 | Observation layout | `[0:36]` waiting alerts per (type, importance 1–3), row-major by type · `[36:48]` alerts of each type that arrived this turn · `[48]` turn / 10 · all counts × 0.1 |
 | `reset(seed=None, options=None)` | returns `(obs, info)` |
 | `step(action)` | returns `(obs, reward, terminated, truncated, info)`; `truncated` is always `False` |
@@ -192,7 +192,7 @@ Tune **once** (max 15 min). If it still fails, train anyway and write the honest
 
 | Path | Owner |
 |---|---|
-| `src/cyberforge/envs/triage/types.py`, `catalogue.py`, `generator.py`, `env.py`, `config.py` | Ali |
+| `src/cyberforge/envs/triage/types.py`, `catalogue.py`, `generator.py`, `env.py`, `config.py`, `observation.py` | Ali |
 | `src/cyberforge/agents/` (policies, bandit, smart analyst, oracle) | Rayane |
 | `src/cyberforge/training/train_ppo.py` | Rayane |
 | `src/cyberforge/eval/` (runner, metrics, plots) | Rayane |
@@ -242,3 +242,5 @@ Host names / correlating alerts on the same machine (W2), LLMs (W3), real logs (
 | When | Change | Why |
 |---|---|---|
 | W1 start | First version agreed by Ali and Rayane | – |
+| W1 skeleton (#3) | Observation space max: `inf` → exact per-number max from the config | `check_env` warns on an infinite max; a real bound also documents what the agent can see |
+| W1 skeleton (#3) | New file `observation.py` (inbox → 49 numbers, mask, max) | Small pure functions, tested alone; keeps `env.py` for the turn logic |
