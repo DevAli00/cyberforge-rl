@@ -1,37 +1,74 @@
 """Oracle of spec §6: reads the hidden truth and goes after the attack closest to ransomware.
 
-The format of `hidden_view()` is not fixed by §5 yet. This module defines a provisional one
-(`HiddenView`), which the fake env in `tests/fakes.py` follows. Ali's env must return the same
-shape, or this module changes when the real env lands.
+It reads Ali's `HiddenView` (`cyberforge.envs.triage.types`, PR #22): `attacks` and the
+waiting `inbox`. The protocols below describe only the fields it uses, so it does not import
+the game and also works with the fake env of the tests.
 """
 
-from typing import Protocol, TypedDict
+from collections.abc import Sequence
+from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
-
-class AttackView(TypedDict):
-    attack_id: int
-    stage: int  # 1-4
-    stopped: bool
-    waiting_alert_types: list[int]  # catalogue indices of this attack's alerts in the inbox
+ACTIVE = "active"  # AttackStatus.ACTIVE is a StrEnum, so it compares equal to this
+IMPACT_STAGE = 4
 
 
-class HiddenView(TypedDict):
-    attacks: list[AttackView]
+class AttackView(Protocol):
+    @property
+    def attack_id(self) -> int: ...
+
+    @property
+    def stage(self) -> int: ...
+
+    @property
+    def status(self) -> str: ...
+
+
+class AlertView(Protocol):
+    @property
+    def alert_id(self) -> int: ...
+
+    @property
+    def rule_index(self) -> int: ...
+
+    @property
+    def importance(self) -> int: ...
+
+    @property
+    def turn(self) -> int: ...
+
+    @property
+    def attack_id(self) -> int | None: ...
+
+
+class HiddenView(Protocol):
+    @property
+    def attacks(self) -> Sequence[AttackView]: ...
+
+    @property
+    def inbox(self) -> Sequence[AlertView]: ...
 
 
 class HasHiddenView(Protocol):
     def hidden_view(self) -> HiddenView: ...
 
 
-class Oracle:
-    """Opens an alert type of the running attack with the highest stage.
+def opened_alert(inbox: Sequence[AlertView], rule_index: int) -> AlertView:
+    """The alert the game opens for this type (spec §4.4 step 1): most important machine,
+    then most recent, then lowest alert_id."""
+    of_type = [alert for alert in inbox if alert.rule_index == rule_index]
+    return max(of_type, key=lambda a: (a.importance, a.turn, -a.alert_id))
 
-    Ties go to the lowest `attack_id`. With no visible attack alert, it opens a random
-    allowed type. Note: the env opens the alert of that type on the most important machine,
-    which may be a false alarm on another machine (spec §4.4), so this is a near upper bound.
+
+class Oracle:
+    """Picks the type whose opened alert stops the running attack closest to ransomware.
+
+    It only counts a type if the alert the game would open is really the attack's alert, so a
+    louder false alarm of the same type on a more important machine is avoided. Attacks already
+    at ransomware come last (opening them is only +0.2). Ties: lowest attack_id, then lowest
+    type. With no attack alert on top of any allowed type, a random allowed type.
     """
 
     name = "oracle"
@@ -42,13 +79,15 @@ class Oracle:
     def act(
         self, obs: NDArray[np.float32], action_mask: NDArray[np.bool_], rng: np.random.Generator
     ) -> int:
-        targets = [
-            (attack["stage"], -attack["attack_id"], alert_type)
-            for attack in self.env.hidden_view()["attacks"]
-            if not attack["stopped"]
-            for alert_type in attack["waiting_alert_types"]
-            if action_mask[alert_type]
-        ]
+        view = self.env.hidden_view()
+        running = {a.attack_id: a.stage for a in view.attacks if a.status == ACTIVE}
+        targets = []
+        for rule_index in map(int, np.flatnonzero(action_mask)):
+            owner = opened_alert(view.inbox, rule_index).attack_id
+            if owner in running:
+                stage = running[owner]
+                priority = -1 if stage == IMPACT_STAGE else stage
+                targets.append((priority, -owner, -rule_index))
         if targets:
-            return int(max(targets)[2])
+            return -max(targets)[2]
         return int(rng.choice(np.flatnonzero(action_mask)))

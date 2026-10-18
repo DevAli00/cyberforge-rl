@@ -2,9 +2,17 @@ import numpy as np
 import pytest
 
 from cyberforge.agents.bandit import LearnedBandit
-from cyberforge.agents.oracle import HiddenView, Oracle
+from cyberforge.agents.oracle import Oracle, opened_alert
 from cyberforge.agents.smart_analyst import SmartAnalyst
-from tests.fakes import CATALOGUE, N_TYPES, OBS_SIZE, FakeTriageEnv
+from tests.fakes import (
+    CATALOGUE,
+    N_TYPES,
+    OBS_SIZE,
+    FakeAlert,
+    FakeAttack,
+    FakeHiddenView,
+    FakeTriageEnv,
+)
 
 OBS = np.zeros(OBS_SIZE, dtype=np.float32)
 
@@ -55,44 +63,80 @@ def test_smart_analyst_lets_the_bandit_choose_within_a_stage() -> None:
     assert analyst.act(OBS, mask, np.random.default_rng(0)) == index_of("cloud_key_new_asn")
 
 
-# Oracle: the running attack closest to ransomware.
+# Oracle: stops the running attack closest to ransomware, using Ali's HiddenView shape.
 
 
 class StubEnv:
-    def __init__(self, view: HiddenView) -> None:
-        self.view = view
+    def __init__(self, attacks: list[FakeAttack], inbox: list[FakeAlert]) -> None:
+        self.view = FakeHiddenView(0, tuple(attacks), tuple(inbox))
 
-    def hidden_view(self) -> HiddenView:
+    def hidden_view(self) -> FakeHiddenView:
         return self.view
 
 
-def attack(attack_id: int, stage: int, types: list[str], stopped: bool = False) -> dict:
-    return {
-        "attack_id": attack_id,
-        "stage": stage,
-        "stopped": stopped,
-        "waiting_alert_types": [index_of(t) for t in types],
-    }
+def alert(
+    alert_id: int, rule_id: str, importance: int = 1, attack_id: int | None = None
+) -> FakeAlert:
+    return FakeAlert(alert_id, index_of(rule_id), importance, turn=0, attack_id=attack_id)
+
+
+def oracle_pick(attacks: list[FakeAttack], inbox: list[FakeAlert]) -> int:
+    mask = np.zeros(N_TYPES, dtype=np.bool_)
+    for a in inbox:
+        mask[a.rule_index] = True
+    return Oracle(StubEnv(attacks, inbox)).act(OBS, mask, np.random.default_rng(0))
 
 
 def test_oracle_goes_after_the_attack_closest_to_ransomware() -> None:
-    view = {
-        "attacks": [
-            attack(0, 1, ["phishing_link_clicked"]),
-            attack(1, 3, ["internal_port_scan"]),
-            attack(2, 4, ["mass_file_rename"], stopped=True),
-        ]
+    attacks = [
+        FakeAttack(0, 1, "active"),
+        FakeAttack(1, 3, "active"),
+        FakeAttack(2, 2, "contained"),
+    ]
+    inbox = [
+        alert(0, "phishing_link_clicked", attack_id=0),
+        alert(1, "internal_port_scan", attack_id=1),
+        alert(2, "new_admin_account", attack_id=2),  # contained: ignored
+    ]
+    assert oracle_pick(attacks, inbox) == index_of("internal_port_scan")
+
+
+def test_oracle_puts_attacks_already_at_ransomware_last() -> None:
+    attacks = [FakeAttack(0, 4, "active"), FakeAttack(1, 1, "active")]
+    inbox = [alert(0, "mass_file_rename", attack_id=0), alert(1, "off_hours_login", attack_id=1)]
+    assert oracle_pick(attacks, inbox) == index_of("off_hours_login")
+
+
+def test_oracle_skips_a_type_where_a_false_alarm_would_be_opened_first() -> None:
+    # Stage-3 attack on an importance-1 machine, but a false alarm of the same type sits on an
+    # importance-3 machine: the game would open the false alarm, so the oracle takes stage 1.
+    attacks = [FakeAttack(0, 3, "active"), FakeAttack(1, 1, "active")]
+    inbox = [
+        alert(0, "internal_port_scan", importance=1, attack_id=0),
+        alert(1, "internal_port_scan", importance=3),
+        alert(2, "phishing_link_clicked", importance=2, attack_id=1),
+    ]
+    assert oracle_pick(attacks, inbox) == index_of("phishing_link_clicked")
+
+
+def test_opened_alert_follows_spec_order() -> None:
+    inbox = [
+        FakeAlert(0, 4, importance=2, turn=1),
+        FakeAlert(1, 4, importance=2, turn=3),
+        FakeAlert(2, 4, importance=2, turn=3),
+        FakeAlert(3, 4, importance=1, turn=5),
+    ]
+    # Most important machine, then most recent, then lowest alert_id.
+    assert opened_alert(inbox, 4).alert_id == 1
+
+
+def test_oracle_falls_back_to_an_allowed_type_without_attack_alerts() -> None:
+    attacks = [FakeAttack(0, 2, "active")]
+    inbox = [alert(0, "usb_device_inserted"), alert(1, "dns_new_domain")]
+    assert oracle_pick(attacks, inbox) in {
+        index_of("usb_device_inserted"),
+        index_of("dns_new_domain"),
     }
-    oracle = Oracle(StubEnv(view))  # type: ignore[arg-type]
-    mask = mask_of("phishing_link_clicked", "internal_port_scan", "mass_file_rename")
-    assert oracle.act(OBS, mask, np.random.default_rng(0)) == index_of("internal_port_scan")
-
-
-def test_oracle_ignores_masked_alerts_and_falls_back_to_allowed() -> None:
-    view = {"attacks": [attack(0, 3, ["internal_port_scan"])]}
-    oracle = Oracle(StubEnv(view))  # type: ignore[arg-type]
-    mask = mask_of("usb_device_inserted")
-    assert oracle.act(OBS, mask, np.random.default_rng(0)) == index_of("usb_device_inserted")
 
 
 def test_oracle_plays_a_full_shift_on_fake_env() -> None:
