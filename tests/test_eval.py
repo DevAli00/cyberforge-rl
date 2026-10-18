@@ -101,6 +101,15 @@ def test_end_to_end_evaluation_writes_results_and_plots(tmp_path, monkeypatch) -
     assert (experiments / "results.json").read_text() == text
 
 
-def test_scripts_explain_that_the_real_env_is_missing() -> None:
+def test_real_env_factory_loads_ali_triage_env() -> None:
+    from cyberforge.envs.triage.env import TriageEnv
+
+    assert real_env_factory() is TriageEnv
+
+
+def test_scripts_explain_when_the_real_env_is_missing(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "cyberforge.envs.triage.env", None)
     with pytest.raises(SystemExit, match="not merged yet"):
         real_env_factory()

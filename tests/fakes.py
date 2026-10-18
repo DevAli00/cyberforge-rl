@@ -1,6 +1,6 @@
-"""Test doubles for the triage game, used until Ali's real env is merged.
+"""Test doubles for the triage game, used while Ali's env only has placeholder turn logic.
 
-`CATALOGUE` copies spec §4.3 and `FakeTriageEnv` has exactly the spaces of spec §5,
+`CATALOGUE` is the real one. `FakeTriageEnv` has exactly the spaces of spec §5,
 but the game logic is fake: observations and masks are random (yet consistent with
 each other) and the reward is always 0. Do not import this from `src/`.
 """
@@ -14,6 +14,9 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from numpy.typing import NDArray
+
+# The real catalogue (PR #22); the env below stays fake.
+from cyberforge.envs.triage.catalogue import CATALOGUE as CATALOGUE
 
 N_TYPES = 12
 N_IMPORTANCE = 3
@@ -49,33 +52,6 @@ class FakeHiddenView:
     turn: int
     attacks: tuple[FakeAttack, ...]
     inbox: tuple[FakeAlert, ...]
-
-
-@dataclass(frozen=True)
-class RuleSpec:
-    rule_id: str
-    severity: int
-    source: str
-    stage: int | None  # None = never raised by an attack (a dash in §4.3)
-    noise_freq: float
-
-
-# Provisional copy of spec §4.3, same order. Replace with Ali's
-# cyberforge.envs.triage.catalogue.CATALOGUE once it is merged.
-CATALOGUE: tuple[RuleSpec, ...] = (
-    RuleSpec("phishing_link_clicked", 3, "email", 1, 0.10),
-    RuleSpec("off_hours_login", 1, "identity", 1, 0.14),
-    RuleSpec("new_admin_account", 2, "identity", 2, 0.02),
-    RuleSpec("cloud_key_new_asn", 2, "cloud", 2, 0.02),
-    RuleSpec("internal_port_scan", 4, "ids", 3, 0.12),
-    RuleSpec("mass_file_rename", 5, "edr", 4, 0.01),
-    RuleSpec("av_signature_hit", 5, "edr", None, 0.16),
-    RuleSpec("encoded_powershell", 4, "edr", None, 0.06),
-    RuleSpec("impossible_travel", 3, "identity", None, 0.10),
-    RuleSpec("failed_login_burst", 3, "identity", None, 0.12),
-    RuleSpec("dns_new_domain", 2, "ids", None, 0.07),
-    RuleSpec("usb_device_inserted", 1, "edr", None, 0.08),
-)
 
 
 class FakeTriageEnv(gym.Env[NDArray[np.float32], np.int64]):
