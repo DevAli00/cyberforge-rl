@@ -35,7 +35,7 @@ def varying_false_alarms(
 def players(env: TriageEnv) -> list[object]:
     ppo = [
         PPOPolicy.load(p, name=f"ppo_{p[-9:-4]}")
-        for p in sorted(glob.glob("models/w01_triage/*.zip"))
+        for p in sorted(glob.glob("models/e3_fixed/*.zip"))
     ]
     return [*ppo, LearnedBandit(len(CATALOGUE)), SmartAnalyst(CATALOGUE), Oracle(env)]
 

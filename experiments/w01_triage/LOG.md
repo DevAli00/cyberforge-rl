@@ -63,7 +63,7 @@ Every experiment goes here, **failures as much as successes**: what we tried, th
   - commit `db5d3ae` (temporary rules), fixed 9 false alarms
   - MaskablePPO `MlpPolicy` with default settings, 3 seeds (0, 1, 2) × 30,000 shifts, run in parallel
   - commands: `uv run python -m cyberforge.training.train_ppo` then `uv run python -m cyberforge.eval.evaluate`
-  - outputs: `results.json`, `learning_curve*.png/json`, `hero_actions.png`, `stopped_before_impact.png`; models in `models/w01_triage/` (git-ignored)
+  - outputs: `e3_fixed/` (`results.json`, learning curves, plots); models moved to `models/e3_fixed/` (git-ignored)
 - **Result:**
   - Training took **2 min 03 s**.
   - Learning curve (training score) per seed, at 1k / 5k / 15k / 30k shifts:
