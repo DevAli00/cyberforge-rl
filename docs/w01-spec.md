@@ -195,7 +195,7 @@ Tune **once** (max 15 min). If it still fails, train anyway and write the honest
 
 | Path | Owner |
 |---|---|
-| `src/cyberforge/envs/triage/types.py`, `catalogue.py`, `generator.py`, `env.py`, `config.py`, `observation.py` | Ali |
+| `src/cyberforge/envs/triage/types.py`, `catalogue.py`, `generator.py`, `env.py`, `config.py`, `observation.py`, `rules.py` | Ali |
 | `src/cyberforge/agents/` (policies, bandit, smart analyst, oracle) | Rayane |
 | `src/cyberforge/training/train_ppo.py` | Rayane |
 | `src/cyberforge/eval/` (runner, metrics, plots) | Rayane |
