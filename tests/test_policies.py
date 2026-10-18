@@ -126,18 +126,18 @@ def test_severity_first_picks_highest_severity_then_most_important_machine(
 
 
 def test_severity_first_prefers_severity_over_machine_importance() -> None:
-    obs, mask = obs_and_mask({"phishing_link_clicked": (0, 0, 3), "av_signature_hit": (1, 0, 0)})
-    assert baselines().SeverityFirst(CATALOGUE).act(
-        obs, mask, np.random.default_rng(0)
-    ) == index_of("av_signature_hit")
-
-
-def test_severity_first_breaks_severity_ties_by_machine_importance() -> None:
-    # Both severity 5: the alert on an importance-3 machine wins over more alerts on importance 1.
-    obs, mask = obs_and_mask({"av_signature_hit": (4, 0, 0), "mass_file_rename": (0, 0, 1)})
+    obs, mask = obs_and_mask({"phishing_link_clicked": (0, 0, 3), "mass_file_rename": (1, 0, 0)})
     assert baselines().SeverityFirst(CATALOGUE).act(
         obs, mask, np.random.default_rng(0)
     ) == index_of("mass_file_rename")
+
+
+def test_severity_first_breaks_severity_ties_by_machine_importance() -> None:
+    # Both severity 4: the alert on an importance-3 machine wins over more alerts on importance 1.
+    obs, mask = obs_and_mask({"av_signature_hit": (4, 0, 0), "encoded_powershell": (0, 0, 1)})
+    assert baselines().SeverityFirst(CATALOGUE).act(
+        obs, mask, np.random.default_rng(0)
+    ) == index_of("encoded_powershell")
 
 
 # (3) AlwaysPhishing: phishing if allowed, else any allowed action.

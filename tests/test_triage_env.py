@@ -12,7 +12,7 @@ from cyberforge.envs.triage.catalogue import N_RULES
 from cyberforge.envs.triage.config import TriageConfig
 from cyberforge.envs.triage.env import TriageEnv
 from cyberforge.envs.triage.observation import observation_high
-from cyberforge.envs.triage.types import HiddenView, InvalidActionError
+from cyberforge.envs.triage.types import AttackStatus, HiddenView, InvalidActionError
 
 INFO_KEYS = {
     "attacks_total",
@@ -199,11 +199,68 @@ def test_info_attacks_total_matches_hidden_view() -> None:
     assert info["attacks_total"] == len(env.hidden_view().attacks)
 
 
-def test_placeholder_inbox_piles_up() -> None:
-    """Placeholder until #6/#9: one false alarm of every type arrives each turn, none are opened."""
+def _attack_alerts(view: HiddenView) -> Counter[int]:
+    return Counter(a.attack_id for a in view.inbox if a.attack_id is not None)
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_reset_starts_attacks_due_on_turn_1(seed: int) -> None:
+    env = TriageEnv()
+    env.reset(seed=seed)
+    view = env.hidden_view()
+    assert len(view.attacks) in env.config.attack_count_choices
+    for attack in view.attacks:
+        if attack.start_turn == 0:
+            assert (attack.status, attack.stage) == (AttackStatus.ACTIVE, 1)
+        else:
+            assert (attack.status, attack.stage) == (AttackStatus.PENDING, 0)
+    started = {a.attack_id for a in view.attacks if a.start_turn == 0}
+    assert _attack_alerts(view) == Counter(dict.fromkeys(started, 1))
+    false_alarms = [a for a in view.inbox if a.is_false_alarm]
+    assert len(false_alarms) == env.config.noise_per_turn
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_each_attack_starts_on_its_turn_with_one_alert(seed: int) -> None:
+    """Until #9 attacks are never opened or advanced, so each keeps exactly its stage-1 alert."""
+    env = TriageEnv()
+    env.reset(seed=seed)
+    terminated = False
+    while not terminated:
+        before = len(env.hidden_view().inbox)
+        _, _, terminated, _, _ = env.step(_first_allowed(env))
+        view = env.hidden_view()
+        due = [a for a in view.attacks if a.start_turn == view.turn]
+        assert all(a.status is AttackStatus.ACTIVE for a in due)
+        assert len(view.inbox) == before + env.config.noise_per_turn + len(due)
+        for attack in view.attacks:
+            started = attack.start_turn <= view.turn
+            assert _attack_alerts(view)[attack.attack_id] == int(started)
+            assert all(a.turn == attack.start_turn for a in view.alerts_of(attack.attack_id))
+
+
+def test_arrivals_carry_the_turn_they_arrive_on() -> None:
     env = TriageEnv()
     env.reset(seed=0)
-    assert len(env.hidden_view().inbox) == N_RULES
-    assert env.action_masks().all()
-    env.step(0)
-    assert len(env.hidden_view().inbox) == 2 * N_RULES
+    env.step(_first_allowed(env))
+    newest = env.hidden_view().inbox[-env.config.noise_per_turn :]
+    assert {a.turn for a in newest} == {1}
+
+
+def test_alert_ids_are_unique_and_increasing() -> None:
+    env = TriageEnv()
+    env.reset(seed=0)
+    for _ in range(5):
+        env.step(_first_allowed(env))
+    ids = [a.alert_id for a in env.hidden_view().inbox]
+    assert ids == sorted(set(ids))
+
+
+def test_some_types_are_really_masked() -> None:
+    """Real arrivals leave rare types empty, so the mask is not always all true."""
+    masks = []
+    for seed in range(20):
+        env = TriageEnv()
+        env.reset(seed=seed)
+        masks.append(env.action_masks().all())
+    assert not all(masks)
