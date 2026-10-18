@@ -421,7 +421,6 @@ wheels = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "filelock"
 version = "4.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -431,8 +430,6 @@ wheels = [
 ]
 
 [[package]]
-=======
->>>>>>> origin/claude/w01-fake-env-iaf4q9
 name = "fonttools"
 version = "4.67.0"
 source = { registry = "https://pypi.org/simple" }
@@ -490,7 +487,6 @@ wheels = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "fsspec"
 version = "2026.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -500,8 +496,6 @@ wheels = [
 ]
 
 [[package]]
-=======
->>>>>>> origin/claude/w01-fake-env-iaf4q9
 name = "gymnasium"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
