@@ -12,6 +12,9 @@ dependencies = [
     "numpy>=2.5.4",
     "pydantic>=2.14.1",
     "pyyaml>=6.0.3",
+    "sb3-contrib>=2.9.0",
+    "stable-baselines3>=2.9.0",
+    "torch>=2.14.1",
 ]
 
 [build-system]

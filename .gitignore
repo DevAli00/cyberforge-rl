@@ -28,3 +28,6 @@ runs/
 .DS_Store
 .idea/
 .vscode/
+
+# Trained models (spec §7)
+models/

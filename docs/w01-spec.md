@@ -246,3 +246,4 @@ Host names / correlating alerts on the same machine (W2), LLMs (W3), real logs (
 | W1 skeleton (#3) | New file `observation.py` (inbox → 49 numbers, mask, max) | Small pure functions, tested alone; keeps `env.py` for the turn logic |
 | After sync 1 | `hidden_view()` format fixed: frozen `HiddenView(turn, attacks, inbox)` | §5 left it open; the oracle (#23) now reads this shape |
 | After sync 1 | `check_env` runs through a test-only mask adapter | It ignores the mask, so it would fail once real alerts leave some types empty; a lenient config option was considered and rejected so the real game can never silently accept a masked action |
+| W1 agents (#23) | §6: players that learn while playing implement `LearningPolicy` = `Policy` + `update(action, reward)`; the runner calls it after every `step` | The `Policy` protocol had no way to receive points, which the learned bandit and the smart analyst need |
