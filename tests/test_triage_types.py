@@ -31,6 +31,7 @@ def _rule(**overrides: object) -> RuleSpec:
         "source": Source.EDR,
         "stage": 1,
         "noise_freq": 0.1,
+        "attack_weight": 1.0,
     }
     return RuleSpec(**{**fields, **overrides})  # type: ignore[arg-type]
 
@@ -61,6 +62,10 @@ def test_types_are_frozen(obj: object) -> None:
         {"stage": 5},
         {"noise_freq": -0.1},
         {"noise_freq": 1.1},
+        {"attack_weight": -0.1},
+        {"attack_weight": 1.1},
+        {"attack_weight": 0.0},  # a stage type must be pickable
+        {"stage": None, "attack_weight": 0.5},  # a noise-only type cannot be picked by attacks
     ],
 )
 def test_rule_spec_rejects_bad_values(overrides: dict[str, object]) -> None:
@@ -69,7 +74,7 @@ def test_rule_spec_rejects_bad_values(overrides: dict[str, object]) -> None:
 
 
 def test_rule_spec_accepts_noise_only_rule() -> None:
-    assert _rule(stage=None).stage is None
+    assert _rule(stage=None, attack_weight=0.0).stage is None
 
 
 def test_alert_false_alarm_flag() -> None:

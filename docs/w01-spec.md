@@ -64,8 +64,9 @@ The −5 on turn 6 was caused by what the agent skipped on turns 3–4. Learning
 |---|---|
 | Attacks per shift | Random: 2, 3 or 4 |
 | Start turn | Random: turn 1 to 6 (step index 0–5) |
+| One turn | ≈ **12 hours** of real time, so a 10-turn shift ≈ one 5-day SOC week. With `p_advance = 0.6` an attack needs 5 turns on average from stage 1 to 4 ≈ 2.5 days, inside the 17 h – 5 days measured from entry to ransomware (Sophos, Mandiant, Secureworks, Huntress). Known gap: one alert opened per turn = 2 deep investigations a day, below the 10–20 alerts per analyst per day in surveys |
 | Speed | Each turn, an unstopped attack has a **60%** chance to move to the next stage (`p_advance = 0.6`) |
-| Alerts | Exactly 1 alert each time an attack enters a stage, from an alert type of that stage (chosen at random if there are two) |
+| Alerts | Exactly 1 alert each time an attack enters a stage, from an alert type of that stage, picked by its `attack_weight` |
 | Target machine importance | 1: 20%, 2: 30%, 3: 50% (attackers prefer important machines) |
 | After ransomware | The attack stays at stage 4. Opening its alert still gives +0.2 |
 
@@ -73,20 +74,22 @@ The −5 on turn 6 was caused by what the agent skipped on turns 3–4. Learning
 
 `noise_freq` = share of false alarms that are of this type (sums to 1). False alarms land on machines of importance 1: 50%, 2: 35%, 3: 15%.
 
-| rule_id | severity | source | attack stage | noise_freq | In plain words |
-|---|---|---|---|---|---|
-| `phishing_link_clicked` | 3 | email | 1 | 0.10 | Very noisy early sign |
-| `off_hours_login` | 1 | identity | 1 | 0.14 | Very noisy early sign |
-| `new_admin_account` | 2 | identity | 2 | 0.02 | Rare false alarm → good clue |
-| `cloud_key_new_asn` | 2 | cloud | 2 | 0.02 | Rare false alarm → good clue |
-| `internal_port_scan` | 4 | ids | 3 | 0.12 | Noisy, but means ransomware is close |
-| `mass_file_rename` | 5 | edr | 4 | 0.01 | Almost always real, always too late |
-| `av_signature_hit` | 5 | edr | – | 0.16 | Loud noise |
-| `encoded_powershell` | 4 | edr | – | 0.06 | Noise |
-| `impossible_travel` | 3 | identity | – | 0.10 | Noise |
-| `failed_login_burst` | 3 | identity | – | 0.12 | Noise |
-| `dns_new_domain` | 2 | ids | – | 0.07 | Noise |
-| `usb_device_inserted` | 1 | edr | – | 0.08 | Noise |
+`attack_weight` = chance that an attack entering that stage raises this type (sums to 1 per stage). Stage-1 weights follow how ransomware really gets in: brute force 26%, stolen credentials 21%, phishing ≤ 7% (Mandiant M-Trends 2025), rescaled to our three entry types. Severities follow the default Sigma / Elastic / Microsoft rule levels. Per-type `noise_freq` and the machine-importance splits have no public source: they stay **our assumption**.
+
+| rule_id | severity | source | attack stage | noise_freq | attack_weight | In plain words |
+|---|---|---|---|---|---|---|
+| `phishing_link_clicked` | 4 | email | 1 | 0.10 | 0.13 | Very noisy early sign, rare way in for ransomware |
+| `off_hours_login` | 1 | identity | 1 | 0.14 | 0.39 | Very noisy early sign (stolen password used) |
+| `new_admin_account` | 2 | identity | 2 | 0.02 | 0.5 | Rare false alarm → good clue |
+| `cloud_key_new_asn` | 3 | cloud | 2 | 0.02 | 0.5 | Rare false alarm → good clue |
+| `internal_port_scan` | 2 | ids | 3 | 0.12 | 1.0 | Noisy and rated low, but means ransomware is close |
+| `mass_file_rename` | 5 | edr | 4 | 0.01 | 1.0 | Almost always real, always too late; the only severity 5 |
+| `av_signature_hit` | 4 | edr | – | 0.16 | 0 | Loud noise |
+| `encoded_powershell` | 4 | edr | – | 0.06 | 0 | Noise |
+| `impossible_travel` | 4 | identity | – | 0.10 | 0 | Noise (VPNs) |
+| `failed_login_burst` | 3 | identity | 1 | 0.12 | 0.48 | Noisy, and the most common way ransomware gets in (brute force) |
+| `dns_new_domain` | 2 | ids | – | 0.07 | 0 | Noise |
+| `usb_device_inserted` | 1 | edr | – | 0.08 | 0 | Noise |
 
 Design rule if we tune these: **early alert types stay noisy, late ones stay reliable.** Otherwise there is no tradeoff to learn.
 
@@ -123,7 +126,7 @@ Rayane codes against this from minute one, using a fake env until the real one i
 |---|---|
 | Class | `cyberforge.envs.triage.env.TriageEnv(gymnasium.Env)` |
 | Settings | `TriageConfig`: frozen dataclass with the defaults from §4 (no YAML this week) |
-| Catalogue | `cyberforge.envs.triage.catalogue.CATALOGUE`: tuple of 12 `RuleSpec(rule_id, severity, source, stage, noise_freq)` in the order of §4.3 |
+| Catalogue | `cyberforge.envs.triage.catalogue.CATALOGUE`: tuple of 12 `RuleSpec(rule_id, severity, source, stage, noise_freq, attack_weight)` in the order of §4.3 |
 | Action space | `Discrete(12)`: index = row in `CATALOGUE` |
 | `action_masks()` | `np.ndarray[bool]` of shape (12,): true if at least one alert of that type is in the inbox |
 | Observation space | `Box(0, high, (49,), float32)`, `high = observation.observation_high(config)`: the largest value each number can reach. Default config: 11.5 for waiting counts (11 arrival rounds × 9 false alarms + 4 attacks × 4 alerts = 115), 1.3 for arrivals (9 + 4), 1.0 for the turn |
@@ -246,4 +249,8 @@ Host names / correlating alerts on the same machine (W2), LLMs (W3), real logs (
 | W1 skeleton (#3) | New file `observation.py` (inbox → 49 numbers, mask, max) | Small pure functions, tested alone; keeps `env.py` for the turn logic |
 | After sync 1 | `hidden_view()` format fixed: frozen `HiddenView(turn, attacks, inbox)` | §5 left it open; the oracle (#23) now reads this shape |
 | After sync 1 | `check_env` runs through a test-only mask adapter | It ignores the mask, so it would fail once real alerts leave some types empty; a lenient config option was considered and rejected so the real game can never silently accept a masked action |
+| W1 research (#6) | Numbers checked against public data (notes: `docs/research/w01-alert-noise.md`, `docs/research/w01-attack-progression.md`). Backed: ~90% noise (Microsoft 81–86%, Kaspersky ~90%), stage order (MITRE ATT&CK, CISA AA24-109A), ransomware detected late (Mandiant: ransom note in 44–49% of cases) | Ali chose to match the data |
+| W1 research (#6) | Stage 1 gets a third type: `failed_login_burst` (stage `–` → 1); new `attack_weight` field (§4.3, §5); stage-1 weights 0.48 / 0.39 / 0.13 | Ransomware gets in mostly by brute force and stolen passwords, rarely by phishing (Mandiant M-Trends 2025) |
+| W1 research (#6) | Severities: phishing 3 → 4, cloud key 2 → 3, port scan 4 → 2, AV hit 5 → 4, impossible travel 3 → 4 | Default levels of Sigma, Elastic and Microsoft rules |
+| W1 research (#6) | Defined one turn ≈ 12 hours (§4.2); `p_advance` stays 0.6 | Matches 17 h – 5 days from entry to ransomware; analyst-capacity gap stated openly |
 | W1 agents (#23) | §6: players that learn while playing implement `LearningPolicy` = `Policy` + `update(action, reward)`; the runner calls it after every `step` | The `Policy` protocol had no way to receive points, which the learned bandit and the smart analyst need |

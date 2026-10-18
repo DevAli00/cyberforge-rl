@@ -103,6 +103,17 @@ def test_start_attack_refuses_a_started_attack() -> None:
         start_attack(_rng(), _active(), turn=0, alert_id=0)
 
 
+def test_start_alert_type_follows_attack_weights() -> None:
+    rng = _rng()
+    pending = Attack(attack_id=0, start_turn=0, importance=1)
+    alerts = [start_attack(rng, pending, 0, 0)[1] for _ in range(20_000)]
+    shares = _shares([a.rule_index for a in alerts], range(N_RULES))
+    for rule_index in RULES_BY_STAGE[1]:
+        assert shares[rule_index] == pytest.approx(
+            CATALOGUE[rule_index].attack_weight, abs=TOLERANCE
+        )
+
+
 def test_stage_alert_type_is_picked_evenly_among_the_stage_types() -> None:
     rng = _rng()
     types = [

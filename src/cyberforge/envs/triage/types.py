@@ -46,6 +46,7 @@ class RuleSpec:
     source: Source
     stage: int | None  # attack stage that raises it, None = only ever a false alarm
     noise_freq: float  # share of false alarms that are of this type
+    attack_weight: float  # chance an attack entering `stage` raises this type (0 if no stage)
 
     def __post_init__(self) -> None:
         _require(bool(self.rule_id), "RuleSpec", "rule_id must not be empty")
@@ -64,6 +65,14 @@ class RuleSpec:
             "RuleSpec",
             f"noise_freq must be in [0, 1], got {self.noise_freq}",
         )
+        if self.stage is None:
+            _require(self.attack_weight == 0, "RuleSpec", "a noise-only type has attack_weight 0")
+        else:
+            _require(
+                0 < self.attack_weight <= 1,
+                "RuleSpec",
+                f"attack_weight must be in (0, 1], got {self.attack_weight}",
+            )
 
 
 @dataclass(frozen=True, slots=True)

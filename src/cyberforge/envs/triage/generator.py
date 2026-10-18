@@ -75,9 +75,11 @@ def try_advance(
 
 
 def _stage_alert(rng: np.random.Generator, attack: Attack, turn: int, alert_id: int) -> Alert:
-    """One alert of the attack's current stage, on its target machine. If the stage has two alert
-    types, each is equally likely."""
-    rule_index = int(rng.choice(RULES_BY_STAGE[attack.stage]))
+    """One alert of the attack's current stage, on its target machine. The type is picked among
+    the stage's types by their attack_weight."""
+    candidates = RULES_BY_STAGE[attack.stage]
+    weights = [CATALOGUE[i].attack_weight for i in candidates]
+    rule_index = int(rng.choice(candidates, p=weights))
     return Alert(
         alert_id=alert_id,
         rule_index=rule_index,
