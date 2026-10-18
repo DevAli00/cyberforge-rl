@@ -54,7 +54,7 @@ The −5 on turn 6 was caused by what the agent skipped on turns 3–4. Learning
 | Setting | Value |
 |---|---|
 | Turns per shift | 10 |
-| False-alarm alerts arriving per turn | 9 (plus any attack alerts) |
+| False-alarm alerts arriving per turn | 9 on average (plus any attack alerts), **always at least 1**. `noise_count` sets how the number varies: **`poisson` (default, capped at 18)**, `fixed` (always 9), `binomial` or `uniform` (6–12) |
 | Alerts opened per turn | 1 |
 | Unopened alerts | Stay in the inbox for later turns |
 
@@ -129,7 +129,7 @@ Rayane codes against this from minute one, using a fake env until the real one i
 | Catalogue | `cyberforge.envs.triage.catalogue.CATALOGUE`: tuple of 12 `RuleSpec(rule_id, severity, source, stage, noise_freq, attack_weight)` in the order of §4.3 |
 | Action space | `Discrete(12)`: index = row in `CATALOGUE` |
 | `action_masks()` | `np.ndarray[bool]` of shape (12,): true if at least one alert of that type is in the inbox |
-| Observation space | `Box(0, high, (49,), float32)`, `high = observation.observation_high(config)`: the largest value each number can reach. Default config: 11.5 for waiting counts (11 arrival rounds × 9 false alarms + 4 attacks × 4 alerts = 115), 1.3 for arrivals (9 + 4), 1.0 for the turn |
+| Observation space | `Box(0, high, (49,), float32)`, `high = observation.observation_high(config)`: the largest value each number can reach. Default config (Poisson, at most 18 false alarms per turn): 21.4 for waiting counts (11 arrival rounds × 18 + 4 attacks × 4 alerts = 214), 2.2 for arrivals (18 + 4), 1.0 for the turn |
 | Observation layout | `[0:36]` waiting alerts per (type, importance 1–3), row-major by type · `[36:48]` alerts of each type that arrived this turn · `[48]` turn / 10 · all counts × 0.1 |
 | `reset(seed=None, options=None)` | returns `(obs, info)` |
 | `step(action)` | returns `(obs, reward, terminated, truncated, info)`; `truncated` is always `False` |
@@ -253,4 +253,7 @@ Host names / correlating alerts on the same machine (W2), LLMs (W3), real logs (
 | W1 research (#6) | Stage 1 gets a third type: `failed_login_burst` (stage `–` → 1); new `attack_weight` field (§4.3, §5); stage-1 weights 0.48 / 0.39 / 0.13 | Ransomware gets in mostly by brute force and stolen passwords, rarely by phishing (Mandiant M-Trends 2025) |
 | W1 research (#6) | Severities: phishing 3 → 4, cloud key 2 → 3, port scan 4 → 2, AV hit 5 → 4, impossible travel 3 → 4 | Default levels of Sigma, Elastic and Microsoft rules |
 | W1 research (#6) | Defined one turn ≈ 12 hours (§4.2); `p_advance` stays 0.6 | Matches 17 h – 5 days from entry to ransomware; analyst-capacity gap stated openly |
+| After first PPO run | New `noise_count` setting; the observation max follows the largest count | With exactly 9 false alarms, arrival totals above 9 revealed an attack alert. Probe E4 (`experiments/w01_triage/LOG.md`): PPO didn't use it, but the shortcut is unrealistic |
+| After first PPO run | At least 1 false alarm per turn | E5: Poisson can draw 0, leaving an empty inbox with no allowed action (10 shifts in 100,000 crashed training) |
+| After E6 | Default `noise_count` = `poisson` | Standard model for random arrivals; PPO beats the bandit in all 4 shapes (E6: +0.15 to +0.26 stopped), Poisson in the middle (+0.19) |
 | W1 agents (#23) | §6: players that learn while playing implement `LearningPolicy` = `Policy` + `update(action, reward)`; the runner calls it after every `step` | The `Policy` protocol had no way to receive points, which the learned bandit and the smart analyst need |

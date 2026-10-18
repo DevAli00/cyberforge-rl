@@ -7,10 +7,11 @@ import numpy as np
 import pytest
 
 from cyberforge.envs.triage.catalogue import CATALOGUE, N_RULES, RULES_BY_STAGE
-from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.config import NoiseCount, TriageConfig
 from cyberforge.envs.triage.generator import (
     draw_attacks,
     draw_false_alarms,
+    draw_noise_count,
     shuffle_arrivals,
     start_attack,
     try_advance,
@@ -18,6 +19,7 @@ from cyberforge.envs.triage.generator import (
 from cyberforge.envs.triage.types import MAX_STAGE, Attack, AttackStatus
 
 CONFIG = TriageConfig()
+FIXED = TriageConfig(noise_count=NoiseCount.FIXED)  # exactly noise_per_turn false alarms
 TOLERANCE = 0.015  # on shares estimated from tens of thousands of draws
 
 
@@ -67,9 +69,9 @@ def test_draw_attacks_distributions() -> None:
 
 
 def test_draw_false_alarms_shape() -> None:
-    alarms = draw_false_alarms(_rng(), CONFIG, turn=4, first_id=37)
-    assert len(alarms) == CONFIG.noise_per_turn
-    assert [a.alert_id for a in alarms] == list(range(37, 37 + CONFIG.noise_per_turn))
+    alarms = draw_false_alarms(_rng(), FIXED, turn=4, first_id=37)
+    assert len(alarms) == FIXED.noise_per_turn
+    assert [a.alert_id for a in alarms] == list(range(37, 37 + FIXED.noise_per_turn))
     assert all(a.turn == 4 and a.is_false_alarm for a in alarms)
 
 
@@ -82,8 +84,14 @@ def test_draw_false_alarms_distributions() -> None:
     assert importance == pytest.approx(list(CONFIG.noise_importance_probs), abs=TOLERANCE)
 
 
-def test_draw_false_alarms_none_when_configured() -> None:
-    assert draw_false_alarms(_rng(), TriageConfig(noise_per_turn=0), 0, 0) == ()
+@pytest.mark.parametrize("noise_count", list(NoiseCount))
+def test_at_least_one_false_alarm_every_turn(noise_count: NoiseCount) -> None:
+    """An empty turn could leave nothing to open (E5 crash). Average 1 makes 0 very likely."""
+    config = TriageConfig(
+        noise_per_turn=1 if noise_count is not NoiseCount.UNIFORM else 3, noise_count=noise_count
+    )
+    rng = _rng()
+    assert min(draw_noise_count(rng, config) for _ in range(5_000)) >= 1
 
 
 # --- start_attack ---------------------------------------------------------------------------
@@ -194,3 +202,42 @@ def test_shuffle_arrivals_keeps_alerts_and_ids() -> None:
 def test_shuffle_arrivals_mixes_the_order() -> None:
     alerts = tuple(draw_false_alarms(_rng(), TriageConfig(noise_per_turn=30), 0, 0))
     assert shuffle_arrivals(_rng(1), alerts) != alerts
+
+
+# --- draw_noise_count -----------------------------------------------------------------------
+
+
+def test_fixed_noise_count_is_always_the_average_and_uses_no_dice() -> None:
+    rng = _rng()
+    before = rng.bit_generator.state
+    assert {draw_noise_count(rng, FIXED) for _ in range(100)} == {FIXED.noise_per_turn}
+    assert rng.bit_generator.state == before  # keeps earlier fixed-count results reproducible
+
+
+@pytest.mark.parametrize(
+    ("noise_count", "variance"),
+    [(NoiseCount.BINOMIAL, 4.5), (NoiseCount.POISSON, 9.0), (NoiseCount.UNIFORM, 4.0)],
+)
+def test_varying_noise_count_shape(noise_count: NoiseCount, variance: float) -> None:
+    config = TriageConfig(noise_count=noise_count)
+    rng = _rng()
+    counts = np.array([draw_noise_count(rng, config) for _ in range(40_000)])
+    assert counts.mean() == pytest.approx(config.noise_per_turn, abs=0.1)
+    assert counts.var() == pytest.approx(variance, rel=0.08)
+    assert counts.min() >= 0
+    assert counts.max() <= config.max_noise_per_turn
+
+
+def test_uniform_noise_count_covers_6_to_12_evenly() -> None:
+    config = TriageConfig(noise_count=NoiseCount.UNIFORM)
+    rng = _rng()
+    counts = [draw_noise_count(rng, config) for _ in range(14_000)]
+    assert set(counts) == set(range(6, 13))
+    assert _shares(counts, range(6, 13)) == pytest.approx([1 / 7] * 7, abs=TOLERANCE)
+
+
+def test_draw_false_alarms_uses_the_drawn_count() -> None:
+    config = TriageConfig(noise_count=NoiseCount.POISSON)
+    for seed in range(20):
+        expected = draw_noise_count(_rng(seed), config)
+        assert len(draw_false_alarms(_rng(seed), config, 0, 0)) == expected

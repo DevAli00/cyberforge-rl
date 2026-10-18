@@ -4,13 +4,14 @@ import dataclasses
 
 import pytest
 
-from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.config import NoiseCount, TriageConfig
 
 
 def test_defaults_match_spec() -> None:
     config = TriageConfig()
     assert config.n_turns == 10
     assert config.noise_per_turn == 9
+    assert config.noise_count is NoiseCount.POISSON
     assert config.attack_count_choices == (2, 3, 4)
     assert config.max_start_turn == 5
     assert config.p_advance == 0.6
@@ -38,6 +39,7 @@ def test_config_can_be_overridden() -> None:
     [
         {"n_turns": 0},
         {"noise_per_turn": -1},
+        {"noise_per_turn": 0},  # at least 1 false alarm per turn
         {"attack_count_choices": ()},
         {"attack_count_choices": (0, 2)},
         {"max_start_turn": -1},
@@ -56,3 +58,40 @@ def test_config_can_be_overridden() -> None:
 def test_config_rejects_bad_values(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError, match=r"TriageConfig"):
         TriageConfig(**overrides)  # type: ignore[arg-type]
+
+
+# --- noise_count: how many false alarms arrive per turn ------------------------------------
+
+
+def test_noise_count_defaults_to_poisson() -> None:
+    """Ali's choice after E6: random arrivals, no 'more than 9' shortcut."""
+    config = TriageConfig()
+    assert config.noise_count is NoiseCount.POISSON
+    assert config.max_noise_per_turn == 18
+
+
+@pytest.mark.parametrize(
+    ("noise_count", "max_noise"),
+    [
+        (NoiseCount.FIXED, 9),
+        (NoiseCount.BINOMIAL, 18),
+        (NoiseCount.POISSON, 18),
+        (NoiseCount.UNIFORM, 12),
+    ],
+)
+def test_max_noise_per_turn(noise_count: NoiseCount, max_noise: int) -> None:
+    assert TriageConfig(noise_count=noise_count).max_noise_per_turn == max_noise
+
+
+def test_noise_count_accepts_plain_strings() -> None:
+    assert TriageConfig(noise_count="poisson").noise_count is NoiseCount.POISSON  # type: ignore[arg-type]
+
+
+def test_noise_count_rejects_unknown_names() -> None:
+    with pytest.raises(ValueError, match=r"TriageConfig"):
+        TriageConfig(noise_count="gaussian")  # type: ignore[arg-type]
+
+
+def test_uniform_needs_an_average_of_at_least_the_spread() -> None:
+    with pytest.raises(ValueError, match=r"TriageConfig"):
+        TriageConfig(noise_count=NoiseCount.UNIFORM, noise_per_turn=2)

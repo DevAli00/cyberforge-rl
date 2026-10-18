@@ -9,7 +9,7 @@ from gymnasium import spaces
 from gymnasium.utils.env_checker import check_env
 
 from cyberforge.envs.triage.catalogue import N_RULES
-from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.config import NoiseCount, TriageConfig
 from cyberforge.envs.triage.env import TriageEnv
 from cyberforge.envs.triage.observation import observation_high
 from cyberforge.envs.triage.types import AttackStatus, HiddenView, InvalidActionError
@@ -205,7 +205,7 @@ def _attack_alerts(view: HiddenView) -> Counter[int]:
 
 @pytest.mark.parametrize("seed", range(10))
 def test_reset_starts_attacks_due_on_turn_1(seed: int) -> None:
-    env = TriageEnv()
+    env = TriageEnv(TriageConfig(noise_count=NoiseCount.FIXED))  # exact false-alarm count
     env.reset(seed=seed)
     view = env.hidden_view()
     assert len(view.attacks) in env.config.attack_count_choices
@@ -257,3 +257,39 @@ def test_some_types_are_really_masked() -> None:
         env.reset(seed=seed)
         masks.append(env.action_masks().all())
     assert not all(masks)
+
+
+@pytest.mark.parametrize("noise_count", list(NoiseCount))
+def test_observations_stay_inside_the_space(noise_count: NoiseCount) -> None:
+    env = TriageEnv(TriageConfig(noise_count=noise_count))
+    rng = np.random.default_rng(0)
+    for seed in range(20):
+        obs, _ = env.reset(seed=seed)
+        assert env.observation_space.contains(obs)
+        terminated = False
+        while not terminated:
+            obs, _, terminated, _, _ = env.step(int(rng.choice(np.flatnonzero(env.action_masks()))))
+            assert env.observation_space.contains(obs)
+
+
+def test_varying_noise_count_changes_arrivals_between_turns() -> None:
+    env = TriageEnv(TriageConfig(noise_count=NoiseCount.BINOMIAL))
+    env.reset(seed=0)
+    counts = set()
+    for _ in range(10):
+        env.step(_first_allowed(env))
+        counts.add(
+            sum(
+                a.is_false_alarm and a.turn == env.hidden_view().turn
+                for a in env.hidden_view().inbox
+            )
+        )
+    assert len(counts) > 1
+
+
+@pytest.mark.parametrize("seed", [9741, 10078, 21607])
+def test_shift_never_starts_with_an_empty_inbox(seed: int) -> None:
+    """These Poisson seeds drew 0 false alarms on turn 1 with no attack starting (E5 crash)."""
+    env = TriageEnv(TriageConfig(noise_count=NoiseCount.POISSON))
+    env.reset(seed=seed)
+    assert env.action_masks().any()
