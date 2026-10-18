@@ -83,8 +83,14 @@ def test_draw_false_alarms_distributions() -> None:
     assert importance == pytest.approx(list(CONFIG.noise_importance_probs), abs=TOLERANCE)
 
 
-def test_draw_false_alarms_none_when_configured() -> None:
-    assert draw_false_alarms(_rng(), TriageConfig(noise_per_turn=0), 0, 0) == ()
+@pytest.mark.parametrize("noise_count", list(NoiseCount))
+def test_at_least_one_false_alarm_every_turn(noise_count: NoiseCount) -> None:
+    """An empty turn could leave nothing to open (E5 crash). Average 1 makes 0 very likely."""
+    config = TriageConfig(
+        noise_per_turn=1 if noise_count is not NoiseCount.UNIFORM else 3, noise_count=noise_count
+    )
+    rng = _rng()
+    assert min(draw_noise_count(rng, config) for _ in range(5_000)) >= 1
 
 
 # --- start_attack ---------------------------------------------------------------------------

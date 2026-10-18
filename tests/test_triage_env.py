@@ -285,3 +285,11 @@ def test_varying_noise_count_changes_arrivals_between_turns() -> None:
             )
         )
     assert len(counts) > 1
+
+
+@pytest.mark.parametrize("seed", [9741, 10078, 21607])
+def test_shift_never_starts_with_an_empty_inbox(seed: int) -> None:
+    """These Poisson seeds drew 0 false alarms on turn 1 with no attack starting (E5 crash)."""
+    env = TriageEnv(TriageConfig(noise_count=NoiseCount.POISSON))
+    env.reset(seed=seed)
+    assert env.action_masks().any()

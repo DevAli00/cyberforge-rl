@@ -38,6 +38,7 @@ def test_config_can_be_overridden() -> None:
     [
         {"n_turns": 0},
         {"noise_per_turn": -1},
+        {"noise_per_turn": 0},  # at least 1 false alarm per turn
         {"attack_count_choices": ()},
         {"attack_count_choices": (0, 2)},
         {"max_start_turn": -1},

@@ -29,17 +29,19 @@ def draw_attacks(rng: np.random.Generator, config: TriageConfig) -> tuple[Attack
 
 
 def draw_noise_count(rng: np.random.Generator, config: TriageConfig) -> int:
-    """How many false alarms arrive this turn (see NoiseCount). FIXED rolls no dice."""
+    """How many false alarms arrive this turn (see NoiseCount). Always at least 1, so the inbox
+    is never empty and there is always something to open. FIXED rolls no dice."""
     mean = config.noise_per_turn
     match config.noise_count:
         case NoiseCount.FIXED:
-            return mean
+            count = mean
         case NoiseCount.BINOMIAL:
-            return int(rng.binomial(2 * mean, 0.5))
+            count = int(rng.binomial(2 * mean, 0.5))
         case NoiseCount.POISSON:
-            return min(int(rng.poisson(mean)), config.max_noise_per_turn)
+            count = min(int(rng.poisson(mean)), config.max_noise_per_turn)
         case NoiseCount.UNIFORM:
-            return int(rng.integers(mean - UNIFORM_NOISE_SPREAD, mean + UNIFORM_NOISE_SPREAD + 1))
+            count = int(rng.integers(mean - UNIFORM_NOISE_SPREAD, mean + UNIFORM_NOISE_SPREAD + 1))
+    return max(count, 1)
 
 
 def draw_false_alarms(

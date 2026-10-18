@@ -74,7 +74,7 @@ class TriageConfig:
     def _check_shift(self) -> None:
         _require(self.n_turns >= 1, f"n_turns must be >= 1, got {self.n_turns}")
         _require(
-            self.noise_per_turn >= 0, f"noise_per_turn must be >= 0, got {self.noise_per_turn}"
+            self.noise_per_turn >= 1, f"noise_per_turn must be >= 1, got {self.noise_per_turn}"
         )
         _require(self.count_scale > 0, f"count_scale must be > 0, got {self.count_scale}")
 
