@@ -192,6 +192,35 @@ Every experiment goes here, **failures as much as successes**: what we tried, th
   - The bandit is the least stable player (score +0.55 to +1.09 across games); PPO stays within +1.92 to +2.07.
 - **Decision:** Ali picks the default shape (Q6).
 
+## E7 · 21:06–21:09 · Official W1 run on the default game (Poisson)
+
+- **Goal:** the official W1 numbers, produced with the standard commands on the default config (`noise_count = poisson`, Ali's choice after E6).
+- **Setup:**
+  - commit `415f5fc` (code as in `19e5a47`); default `TriageConfig`
+  - temporary rules (Q2)
+  - commands: `uv run python -m cyberforge.training.train_ppo` then `uv run python -m cyberforge.eval.evaluate`
+  - outputs in this folder (`results.json`, learning curves, plots); models in `models/w01_triage/`
+- **Result:**
+  - Training 2 min 13 s; evaluation 15 s.
+
+| Player | Stopped | Reached ransomware | Score / shift | Stopped at stage 1–2 / 3 |
+|---|---|---|---|---|
+| **maskable_ppo (3 seeds pooled)** | **2.88 ± 0.03** | **0.15 ± 0.01** | **+2.00 ± 0.08** | 2.60 / 0.28 |
+| ↳ seed 0 / 1 / 2 | 2.87 / 2.89 / 2.88 | | +1.95 / +2.05 / +1.99 | |
+| oracle | 2.83 ± 0.05 | 0.19 | +1.83 | 2.72 / 0.10 |
+| smart_analyst | 2.79 ± 0.05 | 0.23 | +1.46 | 2.43 / 0.36 |
+| learned_bandit | 2.69 ± 0.05 | 0.31 | +0.91 | 2.25 / 0.43 |
+| random | 1.07 ± 0.05 | 1.72 | −7.88 | |
+| always_phishing | 0.57 ± 0.04 | 2.18 | −10.64 | |
+| severity_first | 0.25 ± 0.03 | 2.48 | −12.03 | |
+
+  - PPO minus bandit: **+0.19 stopped, −0.16 reached ransomware, +1.09 score**.
+- **Verdict:**
+  - ✅ The headline holds on the default game.
+  - ✅ **Reproducible:** E7 gives exactly the same numbers and learning curves as E6's Poisson column (same seeds, same config, different script), so training and evaluation are deterministic.
+  - Still on the temporary rules (Q2): re-run E7 after Ali's hand rewrite.
+- **Decision:** these are the W1 numbers for the article (pending Q2).
+
 ---
 
 ## Open questions
@@ -199,8 +228,8 @@ Every experiment goes here, **failures as much as successes**: what we tried, th
 | # | Question | Status |
 |---|---|---|
 | Q1 | What happens when the inbox is empty (no allowed action)? | ✅ Closed: at least 1 false alarm per turn (fix entry, E6) |
-| Q2 | `rules.py` is temporary Claude-written code: Ali to rewrite by hand, then re-run E1 + E3 | Open |
+| Q2 | `rules.py` is temporary Claude-written code: Ali to rewrite by hand, then re-run E7 | Open |
 | Q3 | Oracle is not an upper bound (PPO beats it): rename it in the article, or build a better one? | Open |
 | Q4 | Little headroom between the bandit and the top on the headline (stage-2 types are giveaways) | Known risk, reported honestly |
 | Q5 | Turn = 12 h matches attack speed, but analyst capacity is 5–10× too low | Stated in spec §4.2 |
-| Q6 | Default `noise_count`: fixed, binomial, poisson or uniform? | **Open** (Ali) |
+| Q6 | Default `noise_count`: fixed, binomial, poisson or uniform? | ✅ Closed: poisson (E7) |
