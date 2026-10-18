@@ -10,7 +10,7 @@ from dataclasses import replace
 import numpy as np
 
 from cyberforge.envs.triage.catalogue import CATALOGUE, N_RULES, RULES_BY_STAGE
-from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.config import UNIFORM_NOISE_SPREAD, NoiseCount, TriageConfig
 from cyberforge.envs.triage.types import MAX_STAGE, N_IMPORTANCE, Alert, Attack, AttackStatus
 
 _IMPORTANCE_LEVELS = np.arange(1, N_IMPORTANCE + 1)
@@ -28,12 +28,26 @@ def draw_attacks(rng: np.random.Generator, config: TriageConfig) -> tuple[Attack
     )
 
 
+def draw_noise_count(rng: np.random.Generator, config: TriageConfig) -> int:
+    """How many false alarms arrive this turn (see NoiseCount). FIXED rolls no dice."""
+    mean = config.noise_per_turn
+    match config.noise_count:
+        case NoiseCount.FIXED:
+            return mean
+        case NoiseCount.BINOMIAL:
+            return int(rng.binomial(2 * mean, 0.5))
+        case NoiseCount.POISSON:
+            return min(int(rng.poisson(mean)), config.max_noise_per_turn)
+        case NoiseCount.UNIFORM:
+            return int(rng.integers(mean - UNIFORM_NOISE_SPREAD, mean + UNIFORM_NOISE_SPREAD + 1))
+
+
 def draw_false_alarms(
     rng: np.random.Generator, config: TriageConfig, turn: int, first_id: int
 ) -> tuple[Alert, ...]:
-    """`noise_per_turn` independent false alarms, type from noise_freq, machine from
-    noise_importance_probs. Ids are first_id, first_id + 1, ..."""
-    n_alarms = config.noise_per_turn
+    """This turn's independent false alarms (count from draw_noise_count), type from
+    noise_freq, machine from noise_importance_probs. Ids are first_id, first_id + 1, ..."""
+    n_alarms = draw_noise_count(rng, config)
     types = rng.choice(N_RULES, size=n_alarms, p=_NOISE_PROBS)
     importances = rng.choice(_IMPORTANCE_LEVELS, size=n_alarms, p=config.noise_importance_probs)
     return tuple(

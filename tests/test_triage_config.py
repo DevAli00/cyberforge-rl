@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.config import NoiseCount, TriageConfig
 
 
 def test_defaults_match_spec() -> None:
@@ -56,3 +56,39 @@ def test_config_can_be_overridden() -> None:
 def test_config_rejects_bad_values(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError, match=r"TriageConfig"):
         TriageConfig(**overrides)  # type: ignore[arg-type]
+
+
+# --- noise_count: how many false alarms arrive per turn ------------------------------------
+
+
+def test_noise_count_defaults_to_fixed() -> None:
+    config = TriageConfig()
+    assert config.noise_count is NoiseCount.FIXED
+    assert config.max_noise_per_turn == 9
+
+
+@pytest.mark.parametrize(
+    ("noise_count", "max_noise"),
+    [
+        (NoiseCount.FIXED, 9),
+        (NoiseCount.BINOMIAL, 18),
+        (NoiseCount.POISSON, 18),
+        (NoiseCount.UNIFORM, 12),
+    ],
+)
+def test_max_noise_per_turn(noise_count: NoiseCount, max_noise: int) -> None:
+    assert TriageConfig(noise_count=noise_count).max_noise_per_turn == max_noise
+
+
+def test_noise_count_accepts_plain_strings() -> None:
+    assert TriageConfig(noise_count="poisson").noise_count is NoiseCount.POISSON  # type: ignore[arg-type]
+
+
+def test_noise_count_rejects_unknown_names() -> None:
+    with pytest.raises(ValueError, match=r"TriageConfig"):
+        TriageConfig(noise_count="gaussian")  # type: ignore[arg-type]
+
+
+def test_uniform_needs_an_average_of_at_least_the_spread() -> None:
+    with pytest.raises(ValueError, match=r"TriageConfig"):
+        TriageConfig(noise_count=NoiseCount.UNIFORM, noise_per_turn=2)

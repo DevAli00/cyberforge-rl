@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.config import NoiseCount, TriageConfig
 from cyberforge.envs.triage.observation import (
     OBS_SIZE,
     action_mask,
@@ -78,3 +78,10 @@ def test_worst_case_inbox_fits_under_high() -> None:
     inbox = tuple(_alert(i, 0, 1) for i in range(115))
     obs = encode_observation(inbox=inbox, arrived=(), turn=10, config=CONFIG)
     assert obs[0] <= observation_high(CONFIG)[0]
+
+
+def test_observation_high_uses_the_largest_noise_count() -> None:
+    # waiting: 11 rounds x 18 false alarms + 4 attacks x 4 stages = 214; arrived: 18 + 4 = 22
+    high = observation_high(TriageConfig(noise_count=NoiseCount.BINOMIAL))
+    assert np.allclose(high[:36], 21.4)
+    assert np.allclose(high[36:48], 2.2)

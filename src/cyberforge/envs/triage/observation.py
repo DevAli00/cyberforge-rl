@@ -38,8 +38,9 @@ def observation_high(config: TriageConfig) -> NDArray[np.float32]:
     arrival_rounds = config.n_turns + 1  # at reset, then after every step
     # Each attack raises one alert per stage it enters: at most MAX_STAGE in a shift,
     # and at most one of any given type per turn (stages use different types).
-    max_waiting = arrival_rounds * config.noise_per_turn + max_attacks * MAX_STAGE
-    max_arrived = config.noise_per_turn + max_attacks
+    max_noise = config.max_noise_per_turn
+    max_waiting = arrival_rounds * max_noise + max_attacks * MAX_STAGE
+    max_arrived = max_noise + max_attacks
     counts = np.zeros(OBS_SIZE, dtype=np.int64)
     counts[:WAITING_SIZE] = max_waiting
     counts[ARRIVED_START:TURN_INDEX] = max_arrived

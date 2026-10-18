@@ -9,7 +9,7 @@ from gymnasium import spaces
 from gymnasium.utils.env_checker import check_env
 
 from cyberforge.envs.triage.catalogue import N_RULES
-from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.config import NoiseCount, TriageConfig
 from cyberforge.envs.triage.env import TriageEnv
 from cyberforge.envs.triage.observation import observation_high
 from cyberforge.envs.triage.types import AttackStatus, HiddenView, InvalidActionError
@@ -257,3 +257,31 @@ def test_some_types_are_really_masked() -> None:
         env.reset(seed=seed)
         masks.append(env.action_masks().all())
     assert not all(masks)
+
+
+@pytest.mark.parametrize("noise_count", list(NoiseCount))
+def test_observations_stay_inside_the_space(noise_count: NoiseCount) -> None:
+    env = TriageEnv(TriageConfig(noise_count=noise_count))
+    rng = np.random.default_rng(0)
+    for seed in range(20):
+        obs, _ = env.reset(seed=seed)
+        assert env.observation_space.contains(obs)
+        terminated = False
+        while not terminated:
+            obs, _, terminated, _, _ = env.step(int(rng.choice(np.flatnonzero(env.action_masks()))))
+            assert env.observation_space.contains(obs)
+
+
+def test_varying_noise_count_changes_arrivals_between_turns() -> None:
+    env = TriageEnv(TriageConfig(noise_count=NoiseCount.BINOMIAL))
+    env.reset(seed=0)
+    counts = set()
+    for _ in range(10):
+        env.step(_first_allowed(env))
+        counts.add(
+            sum(
+                a.is_false_alarm and a.turn == env.hidden_view().turn
+                for a in env.hidden_view().inbox
+            )
+        )
+    assert len(counts) > 1
