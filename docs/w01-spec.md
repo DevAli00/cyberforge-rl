@@ -91,6 +91,7 @@ Pydantic `TriageConfig(frozen=True)`:
 ```python
 class Agent(Protocol):
     name: str
+
     def act(self, observation: Observation, rng: np.random.Generator) -> str: ...
     def update(self, transition: Transition) -> None: ...
 ```
