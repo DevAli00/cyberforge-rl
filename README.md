@@ -1,6 +1,6 @@
 # cyberforge-rl
 
-Reinforcement-learning environments for **defensive** cybersecurity: alert triage, vulnerability detection, sandboxed vulnerability patching and incident response. Each environment comes with procedurally generated scenarios, verifiable rewards and reproducible experiments.
+Reinforcement-learning environments for **defensive** and **offensive** cybersecurity: alert triage, vulnerability detection, sandboxed vulnerability patching and incident response. Each environment comes with procedurally generated scenarios, verifiable rewards and reproducible experiments.
 
 Built in public, one Sunday at a time. Each week ships a tagged release and a write-up.
 
