@@ -1,7 +1,7 @@
 """The SOC triage game (spec §4-5).
 
-SKELETON: real spaces, mask, observation and hidden view; placeholder turn logic.
-- TODO(#6): real false alarms and attacks from generator.py.
+Real false alarms and attacks (generator.py). Attacks start on their turn but are not yet
+opened, contained or advanced:
 - TODO(#9): open, contain + reward (hand-written by Ali), advance, end-of-shift penalty.
 """
 
@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from cyberforge.envs.triage.catalogue import N_RULES
 from cyberforge.envs.triage.config import TriageConfig
+from cyberforge.envs.triage.generator import draw_attacks, draw_false_alarms, start_attack
 from cyberforge.envs.triage.observation import (
     OBS_SIZE,
     action_mask,
@@ -23,6 +24,7 @@ from cyberforge.envs.triage.observation import (
 from cyberforge.envs.triage.types import (
     Alert,
     Attack,
+    AttackStatus,
     HiddenView,
     InvalidActionError,
     ShiftStats,
@@ -59,9 +61,9 @@ class TriageEnv(gym.Env[Obs, np.int64]):
         self._done = False
         self._next_alert_id = 0
         self._inbox = ()
-        self._attacks = ()  # TODO(#6): create 2-4 attacks with self.np_random
+        self._attacks = draw_attacks(self.np_random, self.config)
         self._stats = ShiftStats(attacks_total=len(self._attacks))
-        self._receive(self._placeholder_arrivals())
+        self._receive(self._arrivals(turn=0))
         return self._observation(), self._stats.as_info()
 
     def step(self, action: int | np.integer[Any]) -> tuple[Obs, float, bool, bool, dict[str, Any]]:
@@ -70,11 +72,13 @@ class TriageEnv(gym.Env[Obs, np.int64]):
         self._validate(action)
 
         # TODO(#9) spec §4.4 steps 1-3: open one alert of type `action`, contain + reward
-        # (hand-written), advance unstopped attacks (-5 on reaching stage 4).
+        # (hand-written), advance unstopped attacks with generator.try_advance (-5 on reaching
+        # stage 4); their alerts join this turn's arrivals.
         reward = 0.0
 
-        self._receive(self._placeholder_arrivals())  # TODO(#6): §4.4 step 4
-        self._turn += 1
+        next_turn = self._turn + 1
+        self._receive(self._arrivals(turn=next_turn))  # §4.4 step 4
+        self._turn = next_turn  # §4.4 step 5
         self._done = self._turn >= self.config.n_turns
         # TODO(#9): §4.4 step 5, -1 per attack still running below stage 4 when done.
         return self._observation(), reward, self._done, False, self._stats.as_info()
@@ -98,14 +102,20 @@ class TriageEnv(gym.Env[Obs, np.int64]):
         self._arrived = arrivals
         self._inbox = (*self._inbox, *arrivals)
 
-    def _placeholder_arrivals(self) -> tuple[Alert, ...]:
-        """Placeholder until #6: one false alarm of every type, on importance-1 machines."""
-        first = self._next_alert_id
-        self._next_alert_id += N_RULES
-        return tuple(
-            Alert(alert_id=first + i, rule_index=i, importance=1, turn=self._turn)
-            for i in range(N_RULES)
-        )
+    def _arrivals(self, turn: int) -> tuple[Alert, ...]:
+        """New false alarms for `turn`, then the stage-1 alert of each attack starting on it."""
+        alarms = draw_false_alarms(self.np_random, self.config, turn, self._next_alert_id)
+        self._next_alert_id += len(alarms)
+        attacks: list[Attack] = []
+        starts: list[Alert] = []
+        for attack in self._attacks:
+            if attack.status is AttackStatus.PENDING and attack.start_turn == turn:
+                attack, alert = start_attack(self.np_random, attack, turn, self._next_alert_id)
+                self._next_alert_id += 1
+                starts.append(alert)
+            attacks.append(attack)
+        self._attacks = tuple(attacks)
+        return (*alarms, *starts)
 
     def _observation(self) -> Obs:
         return encode_observation(self._inbox, self._arrived, self._turn, self.config)
