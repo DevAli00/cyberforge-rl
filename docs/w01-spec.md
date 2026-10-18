@@ -131,9 +131,9 @@ Rayane codes against this from minute one, using a fake env until the real one i
 | `reset(seed=None, options=None)` | returns `(obs, info)` |
 | `step(action)` | returns `(obs, reward, terminated, truncated, info)`; `truncated` is always `False` |
 | `info` | `attacks_total`, `contained_early` (stage 1–2), `contained_stage3`, `reached_impact`, `false_alarms` (running totals for this shift) |
-| `hidden_view()` | Read-only snapshot of the truth: each attack's stage and status, and which waiting alerts belong to which attack. **Only the oracle may use it.** |
-| Invalid action | Mask is false → raise `InvalidActionError` |
-| Must pass | `gymnasium.utils.env_checker.check_env` |
+| `hidden_view()` | Read-only snapshot of the truth, a frozen `types.HiddenView(turn, attacks, inbox)`. Each `Attack`: `attack_id`, `start_turn`, `importance`, `stage` (0 = not started, 1–4), `status` (`pending` / `active` / `contained`). Each `Alert` in `inbox`: `alert_id`, `rule_index`, `importance`, `turn`, `attack_id` (`None` = false alarm). **Only the oracle may use it.** |
+| Invalid action | Mask is false, out of range or not an integer → raise `InvalidActionError`; the game is unchanged |
+| Must pass | `gymnasium.utils.env_checker.check_env`, with warnings as errors. `check_env` presses random actions and ignores the mask, so the test runs it on a test-only subclass that swaps a masked action for the first allowed one; the real game keeps raising |
 
 Randomness: only from the env's own generator, seeded by `reset(seed=...)`. No global random.
 
@@ -244,4 +244,6 @@ Host names / correlating alerts on the same machine (W2), LLMs (W3), real logs (
 | W1 start | First version agreed by Ali and Rayane | – |
 | W1 skeleton (#3) | Observation space max: `inf` → exact per-number max from the config | `check_env` warns on an infinite max; a real bound also documents what the agent can see |
 | W1 skeleton (#3) | New file `observation.py` (inbox → 49 numbers, mask, max) | Small pure functions, tested alone; keeps `env.py` for the turn logic |
+| After sync 1 | `hidden_view()` format fixed: frozen `HiddenView(turn, attacks, inbox)` | §5 left it open; the oracle (#23) now reads this shape |
+| After sync 1 | `check_env` runs through a test-only mask adapter | It ignores the mask, so it would fail once real alerts leave some types empty; a lenient config option was considered and rejected so the real game can never silently accept a masked action |
 | W1 agents (#23) | §6: players that learn while playing implement `LearningPolicy` = `Policy` + `update(action, reward)`; the runner calls it after every `step` | The `Policy` protocol had no way to receive points, which the learned bandit and the smart analyst need |

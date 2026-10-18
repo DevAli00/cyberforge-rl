@@ -27,10 +27,45 @@ def _first_allowed(env: TriageEnv) -> int:
     return int(np.flatnonzero(env.action_masks())[0])
 
 
+class _MaskRespectingEnv(TriageEnv):
+    """Test-only: check_env presses random buttons and ignores the mask, so a masked press
+    becomes the first allowed type. The real game keeps raising (spec §5). A subclass, not a
+    gymnasium Wrapper, because check_env warns on wrapped envs."""
+
+    def step(self, action: int | np.integer) -> tuple[np.ndarray, float, bool, bool, dict]:
+        mask = self.action_masks()
+        if 0 <= action < N_RULES and not mask[action]:
+            action = int(np.flatnonzero(mask)[0])
+        return super().step(action)
+
+
 def test_passes_check_env() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        check_env(TriageEnv(), skip_render_check=True)
+        check_env(_MaskRespectingEnv(), skip_render_check=True)
+
+
+def _grey_out(env: TriageEnv, rule_index: int) -> None:
+    """Test-only: remove every waiting alert of one type, so its button is masked."""
+    env._inbox = tuple(a for a in env._inbox if a.rule_index != rule_index)
+    assert not env.action_masks()[rule_index]
+
+
+def test_check_env_adapter_swaps_a_masked_press() -> None:
+    env = _MaskRespectingEnv()
+    env.reset(seed=0)
+    _grey_out(env, 0)
+    env.step(0)  # swapped for an allowed type instead of raising
+
+
+def test_real_step_refuses_a_masked_press() -> None:
+    env = TriageEnv()
+    env.reset(seed=0)
+    _grey_out(env, 0)
+    before = env.hidden_view()
+    with pytest.raises(InvalidActionError):
+        env.step(0)
+    assert env.hidden_view() == before
 
 
 def test_spaces_match_spec() -> None:
